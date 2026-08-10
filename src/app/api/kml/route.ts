@@ -8,45 +8,36 @@ function escapeXml(s: string): string {
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 }
 
-function parseCapacity(val: any): number {
-  if (!val) return -1
-  const s = String(val).trim()
-  const m = s.match(/^(\d+)\s*\/\s*(\d+)$/)
-  if (m) { const t = parseInt(m[2]); return t > 0 ? (parseInt(m[1]) / t) * 100 : 0 }
-  const p = s.match(/^(\d+(?:\.\d+)?)\s*%?$/)
-  if (p) return parseFloat(p[1])
-  return -1
-}
-
-// KML AABBGGRR colors
-const KML_COLORS: Record<string, string> = {
-  green: 'ff5ec522', blue: 'fff6823b', yellow: 'ff08b3ea', red: 'ff4444ef', default: 'ff5ec522',
-}
-function getKmlColor(pct: number): string {
-  if (pct < 0) return KML_COLORS.default
-  if (pct <= 25) return KML_COLORS.green
-  if (pct <= 50) return KML_COLORS.blue
-  if (pct <= 75) return KML_COLORS.yellow
-  return KML_COLORS.red
-}
-
-function getKmlIcon(pct: number): string {
-  if (pct < 0) return 'http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png'
-  if (pct <= 25) return 'http://maps.google.com/mapfiles/kml/pushpin/pushpin-green.png'
-  if (pct <= 50) return 'http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png'
-  if (pct <= 75) return 'http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png'
-  return 'http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png'
+// ── Hitung persentase: Active / Capacity × 100 ──
+function calcPct(meta: Record<string, any>, activeCol: string, capacityCol: string): { pct: number; activeRaw: string; capRaw: string } {
+  if (activeCol && capacityCol) {
+    const aRaw = String(meta[activeCol] ?? '').trim()
+    const cRaw = String(meta[capacityCol] ?? '').trim()
+    const aNum = parseFloat(aRaw.replace(/,/g, ''))
+    const cNum = parseFloat(cRaw.replace(/,/g, ''))
+    if (!isNaN(aNum) && !isNaN(cNum) && cNum > 0) {
+      return { pct: (aNum / cNum) * 100, activeRaw: aRaw, capRaw: cRaw }
+    }
+  }
+  if (capacityCol) {
+    const raw = String(meta[capacityCol] ?? '').trim()
+    const m = raw.match(/^(\d+)\s*[\/\-]\s*(\d+)$/)
+    if (m) { const a = parseInt(m[1]), c = parseInt(m[2]); if (c > 0) return { pct: (a / c) * 100, activeRaw: m[1], capRaw: m[2] } }
+    const p = raw.match(/^(\d+(?:\.\d+)?)\s*%?$/)
+    if (p) return { pct: parseFloat(p[1]), activeRaw: raw, capRaw: '' }
+  }
+  return { pct: -1, activeRaw: '', capRaw: '' }
 }
 
 function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capacityCol: string; activeCol: string; availCol: string }, i: number, meta: Record<string, any>): string {
   const descParts: string[] = []
-  // Status & Avail
-  if (mc.activeCol && meta[mc.activeCol]) descParts.push(`<b>Status:</b> ${escapeXml(String(meta[mc.activeCol]))}`)
-  if (mc.availCol && meta[mc.availCol]) descParts.push(`<b>Avail:</b> ${escapeXml(String(meta[mc.availCol]))}`)
-  // Capacity
-  const capPct = mc.capacityCol ? parseCapacity(meta[mc.capacityCol]) : -1
-  if (capPct >= 0) descParts.push(`<b>Kapasitas:</b> ${escapeXml(String(meta[mc.capacityCol] || ''))} (${Math.round(capPct)}%)`)
-  // Other fields
+  const { pct, activeRaw, capRaw } = calcPct(meta, mc.activeCol, mc.capacityCol)
+  if (pct >= 0) {
+    descParts.push(`<b>${escapeXml(mc.activeCol || 'Active')}:</b> ${escapeXml(activeRaw)}`)
+    descParts.push(`<b>${escapeXml(mc.capacityCol || 'Capacity')}:</b> ${escapeXml(capRaw)}`)
+    descParts.push(`<b>Persentase:</b> ${Math.round(pct)}%`)
+  }
+  if (mc.availCol && meta[mc.availCol] && mc.availCol !== mc.activeCol) descParts.push(`<b>${escapeXml(mc.availCol)}:</b> ${escapeXml(String(meta[mc.availCol]))}`)
   const skipCols = new Set([mc.nameCol1, mc.nameCol2, mc.capacityCol, mc.activeCol, mc.availCol].filter(Boolean))
   for (const [k, v] of Object.entries(meta)) {
     if (skipCols.has(k) || !v || v === '') continue
@@ -55,7 +46,7 @@ function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capaci
   const name = mc.nameCol1 && meta[mc.nameCol1]
     ? [meta[mc.nameCol1], mc.nameCol2 ? meta[mc.nameCol2] : ''].filter(Boolean).join(' - ')
     : meta['name'] || meta['Name'] || meta['NAMA'] || meta['nama'] || meta['KODE'] || meta['kode'] || `Point ${i + 1}`
-  const styleUrl = capPct >= 0 ? `#s-${capPct <= 25 ? 'g' : capPct <= 50 ? 'b' : capPct <= 75 ? 'y' : 'r'}` : '#s-default'
+  const styleUrl = pct >= 0 ? `#s-${pct <= 25 ? 'g' : pct <= 50 ? 'b' : pct <= 75 ? 'y' : 'r'}` : '#s-default'
   return `      <Placemark>
         <name>${escapeXml(String(name))}</name>
         <description><![CDATA[${descParts.join('<br/>')}]]></description>
@@ -76,7 +67,6 @@ export async function GET(req: NextRequest) {
   const groupBy = searchParams.get('groupBy') || ''
   const mc = { nameCol1, nameCol2, capacityCol, activeCol, availCol }
 
-  // Parse 3 column filter slots
   const columnFilters: { field: string; values: string[] }[] = []
   for (let i = 0; i < 3; i++) {
     const field = searchParams.get(`cf${i}`) || ''
@@ -104,7 +94,6 @@ export async function GET(req: NextRequest) {
 
     const points = await db.dataPoint.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 })
 
-    // Build styles
     const styles = `
     <Style id="s-default"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
     <Style id="s-g"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/pushpin-green.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
@@ -112,7 +101,6 @@ export async function GET(req: NextRequest) {
     <Style id="s-y"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
     <Style id="s-r"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>`
 
-    // Group by column if specified
     let foldersXml = ''
     if (groupBy && points.length > 0) {
       const groups = new Map<string, any[]>()
@@ -131,15 +119,7 @@ export async function GET(req: NextRequest) {
       foldersXml = `    <Folder><name>${escapeXml(active.name)}</name>\n${marks}\n    </Folder>\n`
     }
 
-    const kml = `<?xml version="1.0" encoding="UTF-8"?>
-<kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document>
-    <name>${escapeXml(active.name)}</name>
-    <description>${escapeXml(active.name)} - ${points.length} titik</description>
-${styles}
-${foldersXml}
-  </Document>
-</kml>`
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>${escapeXml(active.name)}</name>\n    <description>${escapeXml(active.name)} - ${points.length} titik</description>\n${styles}\n${foldersXml}  </Document>\n</kml>`
 
     return new NextResponse(kml, {
       headers: { 'Content-Type': 'application/vnd.google-earth.kml+xml', 'Cache-Control': 'no-cache, no-store, must-revalidate' },

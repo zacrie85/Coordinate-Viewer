@@ -11,14 +11,28 @@ interface DetailPanelProps {
   onClose: () => void
 }
 
-function parseCapacity(val: any): { pct: number; raw: string; used: string; total: string } {
-  if (!val) return { pct: -1, raw: '', used: '', total: '' }
-  const s = String(val).trim()
-  const m = s.match(/^(\d+)\s*\/\s*(\d+)$/)
-  if (m) { const t = parseInt(m[2]); return { pct: t > 0 ? (parseInt(m[1]) / t) * 100 : 0, raw: s, used: m[1], total: m[2] } }
-  const p = s.match(/^(\d+(?:\.\d+)?)\s*%?$/)
-  if (p) return { pct: parseFloat(p[1]), raw: s, used: '', total: '' }
-  return { pct: -1, raw: s, used: '', total: '' }
+// ── Hitung persentase: Active / Capacity × 100 ──
+function calcPct(meta: Record<string, any>, mc: MarkerConfig): { pct: number; activeRaw: string; capRaw: string; activeNum: number; capNum: number } {
+  if (mc.activeCol && mc.capacityCol) {
+    const aRaw = String(meta[mc.activeCol] ?? '').trim()
+    const cRaw = String(meta[mc.capacityCol] ?? '').trim()
+    const aNum = parseFloat(aRaw.replace(/,/g, ''))
+    const cNum = parseFloat(cRaw.replace(/,/g, ''))
+    if (!isNaN(aNum) && !isNaN(cNum) && cNum > 0) {
+      return { pct: (aNum / cNum) * 100, activeRaw: aRaw, capRaw: cRaw, activeNum: aNum, capNum: cNum }
+    }
+  }
+  if (mc.capacityCol) {
+    const raw = String(meta[mc.capacityCol] ?? '').trim()
+    const m = raw.match(/^(\d+)\s*[\/\-]\s*(\d+)$/)
+    if (m) {
+      const a = parseInt(m[1]), c = parseInt(m[2])
+      if (c > 0) return { pct: (a / c) * 100, activeRaw: m[1], capRaw: m[2], activeNum: a, capNum: c }
+    }
+    const p = raw.match(/^(\d+(?:\.\d+)?)\s*%?$/)
+    if (p) return { pct: parseFloat(p[1]), activeRaw: raw, capRaw: '', activeNum: NaN, capNum: NaN }
+  }
+  return { pct: -1, activeRaw: '', capRaw: '', activeNum: NaN, capNum: NaN }
 }
 
 function statusColor(val: string): string {
@@ -49,8 +63,8 @@ export default function ODPDetailPanel({ point, columns, markerConfig, onClose }
   const name2 = markerConfig.nameCol2 ? String(meta[markerConfig.nameCol2] || '') : ''
   const combinedName = [name1, name2].filter(Boolean).join(' - ')
 
-  // Capacity
-  const cap = parseCapacity(markerConfig.capacityCol ? meta[markerConfig.capacityCol] : null)
+  // Capacity calculation
+  const cap = calcPct(meta, markerConfig)
   const hasCapacity = cap.pct >= 0
 
   // Status
@@ -96,12 +110,18 @@ export default function ODPDetailPanel({ point, columns, markerConfig, onClose }
         </div>
       )}
 
-      {/* Capacity bar */}
+      {/* Capacity bar: Active / Capacity */}
       {hasCapacity && (
         <div className="px-4 py-3 border-b border-slate-100">
           <div className="flex items-center justify-between mb-1.5">
-            <span className="text-xs font-medium text-slate-600">Kapasitas</span>
-            <span className="text-sm font-bold text-slate-800">{cap.raw}</span>
+            <span className="text-xs font-medium text-slate-600">
+              {markerConfig.activeCol && markerConfig.capacityCol
+                ? <>{markerConfig.activeCol} / {markerConfig.capacityCol}</>
+                : 'Kapasitas'}
+            </span>
+            <span className="text-sm font-bold text-slate-800">
+              {cap.activeRaw}{cap.capRaw ? ` / ${cap.capRaw}` : ''}
+            </span>
           </div>
           <div className="flex items-center gap-2">
             <div className="flex-1 bg-slate-100 rounded-full h-2.5 overflow-hidden">

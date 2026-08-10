@@ -26,33 +26,44 @@ interface MapViewProps {
   onSelectPoint: (p: DataPoint | null) => void; columns: string[]; markerConfig: MarkerConfig
 }
 
-// ── Capacity parsing ──
-function parseCapacity(val: any): number {
-  if (val === null || val === undefined || val === '') return -1
-  const s = String(val).trim()
-  const m = s.match(/^(\d+)\s*\/\s*(\d+)$/)
-  if (m) { const t = parseInt(m[2]); return t > 0 ? (parseInt(m[1]) / t) * 100 : 0 }
-  const p = s.match(/^(\d+(?:\.\d+)?)\s*%?$/)
-  if (p) return parseFloat(p[1])
-  return -1
+// ── Hitung persentase: Active / Capacity × 100 ──
+function calcPct(meta: Record<string, any>, mc: MarkerConfig): { pct: number; activeRaw: string; capRaw: string } {
+  // Prioritas 1: ada kolom Active & Capacity terpisah → bagi
+  if (mc.activeCol && mc.capacityCol) {
+    const aRaw = String(meta[mc.activeCol] ?? '').trim()
+    const cRaw = String(meta[mc.capacityCol] ?? '').trim()
+    const aNum = parseFloat(aRaw.replace(/,/g, ''))
+    const cNum = parseFloat(cRaw.replace(/,/g, ''))
+    if (!isNaN(aNum) && !isNaN(cNum) && cNum > 0) {
+      return { pct: (aNum / cNum) * 100, activeRaw: aRaw, capRaw: cRaw }
+    }
+  }
+  // Prioritas 2: kolom Capacity berisi format "8/12"
+  if (mc.capacityCol) {
+    const raw = String(meta[mc.capacityCol] ?? '').trim()
+    const m = raw.match(/^(\d+)\s*[\/\-]\s*(\d+)$/)
+    if (m) {
+      const a = parseInt(m[1]), c = parseInt(m[2])
+      if (c > 0) return { pct: (a / c) * 100, activeRaw: m[1], capRaw: m[2] }
+    }
+    // Prioritas 3: kolom Capacity berisi persentase langsung "66%"
+    const p = raw.match(/^(\d+(?:\.\d+)?)\s*%?$/)
+    if (p) return { pct: parseFloat(p[1]), activeRaw: raw, capRaw: '' }
+  }
+  return { pct: -1, activeRaw: '', capRaw: '' }
 }
 
 const CAP_COLORS = [
-  { min: 0, max: 25, color: '#22c55e', label: '0-25%', bg: 'bg-green-500' },
-  { min: 26, max: 50, color: '#3b82f6', label: '26-50%', bg: 'bg-blue-500' },
-  { min: 51, max: 75, color: '#eab308', label: '51-75%', bg: 'bg-yellow-500' },
-  { min: 76, max: 100, color: '#ef4444', label: '76-100%', bg: 'bg-red-500' },
+  { min: 0, max: 25, color: '#22c55e', label: '0-25%' },
+  { min: 26, max: 50, color: '#3b82f6', label: '26-50%' },
+  { min: 51, max: 75, color: '#eab308', label: '51-75%' },
+  { min: 76, max: 100, color: '#ef4444', label: '76-100%' },
 ]
 
-function getCapacityColor(pct: number): string {
+function getColor(pct: number): string {
   if (pct < 0) return '#10b981'
   for (const c of CAP_COLORS) { if (pct >= c.min && pct <= c.max) return c.color }
   return '#10b981'
-}
-
-function getCapacityLabel(pct: number): string {
-  if (pct < 0) return 'N/A'
-  return `${Math.round(pct)}%`
 }
 
 function statusColor(val: string): string {
@@ -109,75 +120,71 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
     return () => { destroyed = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; layerGroupRef.current = null; markersRef.current.clear() } }
   }, [])
 
-  // Build custom popup HTML
+  // Build popup
   const buildPopup = useCallback((point: DataPoint): string => {
     const mc = mcRef.current
     const meta = point.metadata || {}
-    const hasCapacity = mc.capacityCol && meta[mc.capacityCol]
-    const capVal = hasCapacity ? meta[mc.capacityCol] : ''
-    const capPct = parseCapacity(capVal)
-    const capLabel = hasCapacity ? getCapacityLabel(capPct) : ''
-    const capColor = getCapacityColor(capPct)
-    const activeVal = mc.activeCol ? String(meta[mc.activeCol] || '') : ''
-    const availVal = mc.availCol ? String(meta[mc.availCol] || '') : ''
-    const activeColor = statusColor(activeVal)
-    const availColor = statusColor(availVal)
+    const { pct, activeRaw, capRaw } = calcPct(meta, mc)
+    const pctRound = pct >= 0 ? Math.round(pct) : -1
+    const pctColor = getColor(pct)
+
     // Combined name
     const name1 = mc.nameCol1 ? String(meta[mc.nameCol1] || '') : ''
     const name2 = mc.nameCol2 ? String(meta[mc.nameCol2] || '') : ''
     const combinedName = [name1, name2].filter(Boolean).join(' - ') || Object.entries(meta).find(([, v]) => v && v !== '')?.[0] || 'Point'
-    // Other metadata rows (exclude coord cols + config cols)
-    const skipCols = new Set<string>()
-    if (mc.nameCol1) skipCols.add(mc.nameCol1)
-    if (mc.nameCol2) skipCols.add(mc.nameCol2)
-    if (mc.capacityCol) skipCols.add(mc.capacityCol)
-    if (mc.activeCol) skipCols.add(mc.activeCol)
-    if (mc.availCol) skipCols.add(mc.availCol)
-    const otherCols = columns.filter(c => !skipCols.has(c) && meta[c] && meta[c] !== '').slice(0, 8)
+
+    // Status
+    const activeVal = mc.activeCol ? String(meta[mc.activeCol] || '') : ''
+    const availVal = mc.availCol ? String(meta[mc.availCol] || '') : ''
+    const aColor = statusColor(activeVal)
+
+    // Skip config cols from other metadata
+    const skipCols = new Set<string>([mc.nameCol1, mc.nameCol2, mc.capacityCol, mc.activeCol, mc.availCol].filter(Boolean))
+    const otherCols = columns.filter(c => !skipCols.has(c) && meta[c] && meta[c] !== '').slice(0, 6)
+
     let html = `<div style="min-width:260px;max-width:320px;font-family:system-ui,-apple-system,sans-serif;">`
     // Title
-    html += `<div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:2px;line-height:1.3;">${combinedName}</div>`
-    // Status + Avail row
-    if (activeVal || availVal) {
-      html += `<div style="display:grid;grid-template-columns:1fr 1fr;gap:3px 16px;font-size:11px;margin:6px 0;">`
-      if (activeVal) html += `<div><span style="color:#94a3b8;">Status:</span> <b style="color:${activeColor};">${activeVal}</b></div>`
-      if (availVal) html += `<div><span style="color:#94a3b8;">Avail:</span> <b style="color:${availColor};">${availVal}</b></div>`
-      html += `</div>`
+    html += `<div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:4px;line-height:1.3;">${combinedName}</div>`
+    // Code + Status + Capacity row
+    html += `<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:4px;">`
+    if (activeVal) html += `<span style="color:${aColor};font-weight:700;">${activeVal}</span>`
+    if (pct >= 0) {
+      html += `<span style="color:#64748b;">/</span>`
+      html += `<span style="font-weight:700;color:#334155;">${capRaw || activeRaw}</span>`
+      html += `<span style="margin-left:auto;font-weight:800;color:${pctColor};font-size:12px;">${pctRound}%</span>`
     }
+    html += `</div>`
     // Capacity bar
-    if (hasCapacity && capPct >= 0) {
-      const pctRound = Math.round(capPct)
-      html += `<div style="font-size:11px;color:#64748b;margin:6px 0 3px;">Kapasitas: <b style="color:#334155;">${String(capVal)}</b> <span style="float:right;font-weight:700;color:#334155;">${pctRound}%</span></div>`
-      html += `<div style="background:#e2e8f0;border-radius:4px;height:8px;overflow:hidden;"><div style="background:${capColor};height:100%;width:${Math.min(pctRound, 100)}%;border-radius:4px;transition:width 0.3s;"></div></div>`
+    if (pct >= 0) {
+      html += `<div style="background:#e2e8f0;border-radius:4px;height:6px;overflow:hidden;margin-bottom:6px;"><div style="background:${pctColor};height:100%;width:${Math.min(pctRound, 100)}%;border-radius:4px;"></div></div>`
     }
     // Other metadata
     if (otherCols.length > 0) {
-      html += `<div style="border-top:1px solid #f1f5f9;margin-top:8px;padding-top:8px;">`
+      html += `<div style="border-top:1px solid #f1f5f9;margin-top:4px;padding-top:6px;">`
       for (const c of otherCols) {
         html += `<div style="font-size:11px;color:#64748b;margin-bottom:2px;"><span style="color:#94a3b8;">${c}:</span> ${String(meta[c]).substring(0, 60)}</div>`
       }
       html += `</div>`
     }
-    // Coordinates
-    html += `<div style="font-size:10px;color:#94a3b8;margin-top:8px;">${point.latitude}, ${point.longitude}</div>`
+    html += `<div style="font-size:10px;color:#94a3b8;margin-top:6px;">${point.latitude}, ${point.longitude}</div>`
     html += `</div>`
     return html
   }, [columns])
 
   // Capacity stats for legend
   const capStats = useMemo(() => {
-    if (!markerConfig.capacityCol) return null
-    let g=0, b=0, y=0, r=0, na=0
+    if (!markerConfig.activeCol || !markerConfig.capacityCol) return null
+    let g = 0, b = 0, y = 0, r = 0, na = 0
     for (const p of points) {
-      const v = parseCapacity(p.metadata?.[markerConfig.capacityCol])
-      if (v < 0) { na++; continue }
-      if (v <= 25) g++
-      else if (v <= 50) b++
-      else if (v <= 75) y++
+      const { pct } = calcPct(p.metadata || {}, markerConfig)
+      if (pct < 0) { na++; continue }
+      if (pct <= 25) g++
+      else if (pct <= 50) b++
+      else if (pct <= 75) y++
       else r++
     }
     return { green: g, blue: b, yellow: y, red: r, na }
-  }, [points, markerConfig.capacityCol])
+  }, [points, markerConfig.activeCol, markerConfig.capacityCol])
 
   // Update markers
   useEffect(() => {
@@ -188,10 +195,9 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
     for (const point of pointsRef.current) {
       if (point.latitude === 0 && point.longitude === 0) continue
       const isSelected = selectedPoint?.id === point.id
-      const mc = mcRef.current
-      const capPct = mc.capacityCol ? parseCapacity(point.metadata?.[mc.capacityCol]) : -1
-      const fillColor = isSelected ? '#ffffff' : getCapacityColor(capPct)
-      const strokeColor = isSelected ? '#000000' : getCapacityColor(capPct)
+      const { pct } = calcPct(point.metadata || {}, mcRef.current)
+      const fillColor = isSelected ? '#ffffff' : getColor(pct)
+      const strokeColor = isSelected ? '#000000' : getColor(pct)
       const marker = L!.circleMarker([point.latitude, point.longitude], {
         radius: isSelected ? 8 : 5,
         fillColor,
@@ -240,9 +246,9 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
       {/* Legend */}
       <div className="absolute bottom-4 left-4 z-[1000] bg-white/95 backdrop-blur-sm rounded-lg shadow-lg p-3 text-xs space-y-1.5">
         <div className="font-semibold text-slate-700">Titik Data: {totalCoord.toLocaleString()}</div>
-        {capStats && markerConfig.capacityCol ? (
+        {capStats && markerConfig.activeCol && markerConfig.capacityCol ? (
           <div className="space-y-1 pt-1 border-t border-slate-100">
-            <div className="text-[10px] text-slate-400 font-medium">Kapasitas ({markerConfig.capacityCol})</div>
+            <div className="text-[10px] text-slate-400 font-medium">{markerConfig.activeCol} / {markerConfig.capacityCol}</div>
             {CAP_COLORS.map(c => {
               const count = c.label === '0-25%' ? capStats.green : c.label === '26-50%' ? capStats.blue : c.label === '51-75%' ? capStats.yellow : capStats.red
               return (
