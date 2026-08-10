@@ -5,17 +5,22 @@ export async function GET(req: NextRequest) {
   const host = searchParams.get('host') || 'localhost:3000'
   const protocol = searchParams.get('protocol') || 'https'
   const refresh = searchParams.get('refresh') || '5'
-  const search = searchParams.get('search') || ''
-  const hasCoord = searchParams.get('hasCoord') || ''
-  const customField = searchParams.get('customField') || ''
-  const customValues = searchParams.get('customValues') || ''
 
   try {
+    // Forward all filter + marker config params to the KML endpoint
     const kmlParams = new URLSearchParams()
-    if (search) kmlParams.set('search', search)
-    if (hasCoord) kmlParams.set('hasCoord', hasCoord)
-    if (customField) kmlParams.set('customField', customField)
-    if (customValues) kmlParams.set('customValues', customValues)
+    const forwardKeys = ['search', 'hasCoord', 'nameCol1', 'nameCol2', 'capacityCol', 'activeCol', 'availCol', 'groupBy']
+    for (const key of forwardKeys) {
+      const val = searchParams.get(key)
+      if (val) kmlParams.set(key, val)
+    }
+    // Forward cf0-cf2 / cv0-cv2
+    for (let i = 0; i < 3; i++) {
+      const cf = searchParams.get(`cf${i}`)
+      const cv = searchParams.get(`cv${i}`)
+      if (cf) kmlParams.set(`cf${i}`, cf)
+      if (cv) kmlParams.set(`cv${i}`, cv)
+    }
 
     const qs = kmlParams.toString()
     const kmlUrl = `${protocol}://${host}/api/kml${qs ? '?' + qs : ''}`

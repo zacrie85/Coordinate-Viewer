@@ -14,7 +14,7 @@ interface ActiveFilters {
 }
 
 export default function GoogleEarthDialog({
-  open, onOpenChange, filters, filteredCount, totalCount, datasetName,
+  open, onOpenChange, filters, markerConfig, filteredCount, totalCount, datasetName,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -70,11 +70,11 @@ export default function GoogleEarthDialog({
       }
     })
     // Marker config params
-    if (filters.markerConfig.nameCol1) params.set('nameCol1', filters.markerConfig.nameCol1)
-    if (filters.markerConfig.nameCol2) params.set('nameCol2', filters.markerConfig.nameCol2)
-    if (filters.markerConfig.capacityCol) params.set('capacityCol', filters.markerConfig.capacityCol)
-    if (filters.markerConfig.activeCol) params.set('activeCol', filters.markerConfig.activeCol)
-    if (filters.markerConfig.availCol) params.set('availCol', filters.markerConfig.availCol)
+    if (markerConfig.nameCol1) params.set('nameCol1', markerConfig.nameCol1)
+    if (markerConfig.nameCol2) params.set('nameCol2', markerConfig.nameCol2)
+    if (markerConfig.capacityCol) params.set('capacityCol', markerConfig.capacityCol)
+    if (markerConfig.activeCol) params.set('activeCol', markerConfig.activeCol)
+    if (markerConfig.availCol) params.set('availCol', markerConfig.availCol)
     // Group by first active filter column
     const firstActiveFilter = filters.customFilters.find(cf => cf.field && cf.values.length > 0)
     if (firstActiveFilter) params.set('groupBy', firstActiveFilter.field)

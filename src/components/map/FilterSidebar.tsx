@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   Search, X, ChevronDown, ChevronUp, MapPin, Database, Upload,
-  Trash2, Crosshair, Filter, ArrowUpFromLine, Layers, Eye, Plus, Minus,
+  Trash2, Crosshair, Filter, ArrowUpFromLine, Layers, Eye,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CustomFilterSlot, MarkerConfig } from '@/app/page'
