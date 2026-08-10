@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { Menu, MapPin, X, PanelRightClose, Upload } from 'lucide-react'
+import { Menu, MapPin, X, PanelRightClose, Upload, Globe } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { toast } from 'sonner'
 
@@ -9,6 +9,7 @@ const ODPMap = dynamic(() => import('@/components/map/ODPMap'), { ssr: false })
 const UploadExcelDialog = dynamic(() => import('@/components/map/UploadExcelDialog'), { ssr: false })
 const FilterSidebar = dynamic(() => import('@/components/map/FilterSidebar'), { ssr: false })
 const ODPDetailPanel = dynamic(() => import('@/components/map/ODPDetailPanel'), { ssr: false })
+const GoogleEarthDialog = dynamic(() => import('@/components/map/GoogleEarthDialog'), { ssr: false })
 
 interface DataPoint {
   id: string; latitude: number; longitude: number; metadata: Record<string, any>; createdAt: string
@@ -31,6 +32,7 @@ export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
+  const [googleEarthOpen, setGoogleEarthOpen] = useState(false)
   const [customField, setCustomField] = useState('')
   const [customValues, setCustomValues] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState('')
@@ -75,19 +77,25 @@ export default function Home() {
     setSelectedPoint(null)
   }, [])
 
+  const filteredWithCoord = points.filter(p => p.latitude !== 0 && p.longitude !== 0).length
+
   return (
     <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
-      {/* Mobile header */}
       <div className="lg:hidden flex items-center justify-between px-4 py-2 bg-white border-b border-slate-200 z-50">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center"><MapPin className="w-4 h-4 text-emerald-600" /></div>
           <div><h1 className="text-sm font-bold text-slate-800">Map Viewer</h1><p className="text-[10px] text-slate-400">{datasetName || 'Upload Excel untuk mulai'}</p></div>
         </div>
-        <button className="h-8 w-8 flex items-center justify-center rounded hover:bg-slate-100" onClick={() => setMobileSidebar(!mobileSidebar)}><Menu className="w-4 h-4" /></button>
+        <div className="flex items-center gap-1">
+          {stats && stats.total > 0 && (
+            <button className="h-8 px-2 flex items-center gap-1.5 rounded-lg hover:bg-blue-50 text-blue-600" onClick={() => setGoogleEarthOpen(true)}>
+              <Globe className="w-4 h-4" /><span className="text-xs font-medium">KML</span>
+            </button>
+          )}
+          <button className="h-8 w-8 flex items-center justify-center rounded hover:bg-slate-100" onClick={() => setMobileSidebar(!mobileSidebar)}><Menu className="w-4 h-4" /></button>
+        </div>
       </div>
-
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
-        {/* Mobile sidebar */}
         {mobileSidebar && (
           <div className="lg:hidden fixed inset-0 z-40">
             <div className="absolute inset-0 bg-black/30" onClick={() => setMobileSidebar(false)} />
@@ -96,15 +104,11 @@ export default function Home() {
             </div>
           </div>
         )}
-
-        {/* Desktop sidebar */}
         {sidebarOpen && (
           <div className="hidden lg:block shrink-0">
             <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} customField={customField} customValues={customValues} searchQuery={searchQuery} hasCoord={hasCoord} onFiltersChange={handleFiltersChange} onUploadClick={() => setUploadDialogOpen(true)} onDatasetSwitch={refreshAll} />
           </div>
         )}
-
-        {/* Map area */}
         <div className="flex-1 relative min-h-0 min-w-0">
           {!sidebarOpen && (
             <button className="absolute top-4 left-4 z-[1000] h-9 w-9 bg-white rounded-lg shadow-lg flex items-center justify-center hover:bg-slate-50" onClick={() => setSidebarOpen(true)}><Menu className="w-4 h-4" /></button>
@@ -112,9 +116,13 @@ export default function Home() {
           {sidebarOpen && (
             <button className="hidden lg:flex absolute top-4 left-[21rem] z-[1000] h-9 w-9 bg-white rounded-lg shadow-lg items-center justify-center hover:bg-slate-50" onClick={() => setSidebarOpen(false)}><PanelRightClose className="w-4 h-4" /></button>
           )}
-
+          {stats && stats.total > 0 && (
+            <button className="absolute top-4 right-4 z-[1000] h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-blue-50 text-blue-600 font-medium text-xs transition-colors" onClick={() => setGoogleEarthOpen(true)}>
+              <Globe className="w-4 h-4" />
+              <span className="hidden sm:inline">Export Google Earth</span>
+            </button>
+          )}
           <ODPMap points={points} loading={loading} selectedPoint={selectedPoint} onSelectPoint={setSelectedPoint} columns={columns} />
-
           {selectedPoint && (
             <div className="hidden md:block absolute right-0 top-0 h-full z-[999]">
               <ODPDetailPanel point={selectedPoint} columns={columns} onClose={() => setSelectedPoint(null)} />
@@ -126,8 +134,6 @@ export default function Home() {
               <ODPDetailPanel point={selectedPoint} columns={columns} onClose={() => setSelectedPoint(null)} />
             </div>
           )}
-
-          {/* Empty state */}
           {!loading && points.length === 0 && !stats?.total && (
             <div className="absolute inset-0 flex items-center justify-center z-[1001]">
               <div className="text-center p-8 bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl max-w-sm">
@@ -140,8 +146,15 @@ export default function Home() {
           )}
         </div>
       </div>
-
       <UploadExcelDialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen} onUploadComplete={refreshAll} />
+      <GoogleEarthDialog
+        open={googleEarthOpen}
+        onOpenChange={setGoogleEarthOpen}
+        filters={{ search: searchQuery, hasCoord, customField, customValues }}
+        filteredCount={filteredWithCoord}
+        totalCount={stats?.withCoord || 0}
+        datasetName={datasetName}
+      />
     </div>
   )
 }
