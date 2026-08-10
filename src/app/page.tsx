@@ -134,7 +134,7 @@ export default function Home() {
               <ODPDetailPanel point={selectedPoint} columns={columns} onClose={() => setSelectedPoint(null)} />
             </div>
           )}
-          {!loading && points.length === 0 && !stats?.total && (
+          {!loading && points.length === 0 && !stats?.total && !uploadDialogOpen && (
             <div className="absolute inset-0 flex items-center justify-center z-[1001]">
               <div className="text-center p-8 bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl max-w-sm">
                 <div className="w-16 h-16 rounded-2xl bg-emerald-100 flex items-center justify-center mx-auto mb-4"><Upload className="w-8 h-8 text-emerald-600" /></div>

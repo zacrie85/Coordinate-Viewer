@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
 
-// ── Coordinate auto-detection ──
-
 function parseCoordValue(val: any): [number, number] | null {
   if (val === null || val === undefined || val === '') return null
   const s = String(val).trim()
   if (!s) return null
-  // Comma-separated: "-6.242,106.446"
   if (s.includes(',')) {
     const parts = s.split(',').map(p => parseFloat(p.trim()))
     if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) return [parts[0], parts[1]]
   }
-  // Space-separated
   if (s.includes(' ')) {
     const parts = s.split(/\s+/).map(p => parseFloat(p.trim()))
     if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) return [parts[0], parts[1]]
@@ -35,18 +31,15 @@ function extractCoordinates(
   row: Record<string, any>,
   det: { latCol: string | null; lngCol: string | null; coordCol: string | null }
 ): { latitude: number; longitude: number } {
-  // Priority 1: Separate lat/lng columns
   if (det.latCol && det.lngCol) {
     const lat = parseFloat(row[det.latCol])
     const lng = parseFloat(row[det.lngCol])
     if (!isNaN(lat) && !isNaN(lng) && lat !== 0 && lng !== 0) return { latitude: lat, longitude: lng }
   }
-  // Priority 2: Combined coordinate column
   if (det.coordCol) {
     const parsed = parseCoordValue(row[det.coordCol])
     if (parsed && parsed[0] !== 0 && parsed[1] !== 0) return { latitude: parsed[0], longitude: parsed[1] }
   }
-  // Priority 3: Scan ALL columns for coord pair
   for (const [, val] of Object.entries(row)) {
     const parsed = parseCoordValue(val)
     if (parsed && parsed[0] !== 0 && parsed[1] !== 0) return { latitude: parsed[0], longitude: parsed[1] }
@@ -70,27 +63,11 @@ function buildMetadata(
   return meta
 }
 
-function buildInsertSql(
-  datasetId: string,
-  rows: { latitude: number; longitude: number; metadata: Record<string, any> }[]
-): string {
-  const vals = rows.map(r => {
-    const lat = r.latitude || 0
-    const lng = r.longitude || 0
-    const meta = JSON.stringify(r.metadata).replace(/'/g, "''")
-    return `('${datasetId}', ${lat}, ${lng}, '${meta}'::jsonb)`
-  }).join(',\n    ')
-  return `INSERT INTO "DataPoint" ("datasetId", "latitude", "longitude", "metadata") VALUES\n    ${vals}`
-}
-
-// ── Main handler ──
-
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json()
     const { action, datasetId, headers, rows, chunkIndex, totalChunks, detection, datasetName } = body
 
-    // ── CREATE DATASET ──
     if (action === 'create-dataset') {
       const det = detectCoordinateColumns(headers || [])
       const dataset = await db.dataset.create({
@@ -105,7 +82,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ datasetId: dataset.id, detection: det })
     }
 
-    // ── DEACTIVATE OLD DATASETS ──
     if (action === 'deactivate-others') {
       await db.dataset.updateMany({
         where: { id: { not: datasetId } },
@@ -114,13 +90,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
-    // ── DELETE POINTS FOR DATASET ──
     if (action === 'delete-points') {
       const result = await db.dataPoint.deleteMany({ where: { datasetId } })
       return NextResponse.json({ deleted: result.count })
     }
 
-    // ── UPDATE DATASET ROW COUNT ──
     if (action === 'update-count') {
       await db.dataset.update({
         where: { id: datasetId },
@@ -129,7 +103,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true })
     }
 
-    // ── INSERT CHUNK ──
     if (action === 'insert') {
       if (!datasetId || !Array.isArray(rows)) {
         return NextResponse.json({ error: 'datasetId dan rows wajib' }, { status: 400 })
@@ -149,13 +122,20 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ chunkIndex, totalChunks, inserted: 0, skipped: rows.length })
       }
 
-      const sql = buildInsertSql(datasetId, processed)
-      await db.$executeRawUnsafe(sql)
+      // Use Prisma createMany instead of raw SQL for reliability
+      await db.dataPoint.createMany({
+        data: processed.map(r => ({
+          datasetId,
+          latitude: r.latitude || 0,
+          longitude: r.longitude || 0,
+          metadata: r.metadata,
+        })),
+        skipDuplicates: true,
+      })
 
       return NextResponse.json({ chunkIndex, totalChunks, inserted: processed.length, skipped: rows.length - processed.length })
     }
 
-    // ── MANUAL DETECTION (for preview) ──
     if (action === 'detect') {
       const det = detectCoordinateColumns(headers || [])
       return NextResponse.json({ detection: det })
