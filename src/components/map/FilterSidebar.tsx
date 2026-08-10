@@ -410,67 +410,106 @@ export default function FilterSidebar({
 
         <hr className="border-slate-100" />
 
-        {/* DISPLAY SETTINGS */}
+        {/* AUTO-DETECT INFO + OVERRIDE */}
         <div>
           <button className="flex items-center justify-between w-full text-sm font-semibold text-slate-700 mb-2" onClick={() => toggleSection('display')}>
-            <div className="flex items-center gap-2"><Eye className="w-4 h-4" /> Pengaturan Tampilan</div>
+            <div className="flex items-center gap-2"><Eye className="w-4 h-4" /> Warna & Nama Marker</div>
             {expandedSections.display ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
           {expandedSections.display && (
-            <div className="space-y-2">
-              <p className="text-[10px] text-slate-400">Atur kolom untuk nama marker, warna kapasitas, dan status.</p>
-              {/* Nama Marker */}
-              <div>
-                <label className="text-[11px] font-medium text-slate-600 mb-1 block">Nama Marker (2 kolom digabung)</label>
-                <div className="flex gap-1 items-center">
-                  <select className="flex-1 h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-                    value={markerConfig.nameCol1} onChange={e => onMarkerConfigChange({ ...markerConfig, nameCol1: e.target.value })}>
-                    <option value="">Kolom 1</option>
-                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                  <span className="text-slate-300 text-xs">-</span>
-                  <select className="flex-1 h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-                    value={markerConfig.nameCol2} onChange={e => onMarkerConfigChange({ ...markerConfig, nameCol2: e.target.value })}>
-                    <option value="">Kolom 2</option>
-                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+            <div className="space-y-2.5">
+              {/* Auto-detect status */}
+              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
+                <div className="flex items-center gap-1.5 mb-1.5">
+                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide">Auto-Detected</span>
+                </div>
+                <div className="space-y-1 text-[11px]">
+                  {markerConfig.capacityCol && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Kapasitas:</span>
+                      <span className="font-semibold text-slate-700">{markerConfig.capacityCol}</span>
+                    </div>
+                  )}
+                  {markerConfig.activeCol && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Status:</span>
+                      <span className="font-semibold text-slate-700">{markerConfig.activeCol}</span>
+                    </div>
+                  )}
+                  {markerConfig.nameCol1 && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-500">Nama:</span>
+                      <span className="font-semibold text-slate-700 truncate max-w-[140px]">{markerConfig.nameCol1}{markerConfig.nameCol2 ? ` - ${markerConfig.nameCol2}` : ''}</span>
+                    </div>
+                  )}
+                  {!markerConfig.capacityCol && !markerConfig.activeCol && !markerConfig.nameCol1 && (
+                    <p className="text-slate-400 italic">Tidak ada kolom yang terdeteksi otomatis</p>
+                  )}
                 </div>
               </div>
-              {/* Capacity */}
+              {/* Color legend */}
               <div>
-                <label className="text-[11px] font-medium text-slate-600 mb-1 block">Kolom Kapasitas (untuk warna)</label>
-                <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-                  value={markerConfig.capacityCol} onChange={e => onMarkerConfigChange({ ...markerConfig, capacityCol: e.target.value })}>
-                  <option value="">-- Pilih --</option>
-                  {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-                <div className="flex gap-1.5 mt-1">
+                <div className="text-[10px] text-slate-400 font-medium mb-1">Warna Kapasitas</div>
+                <div className="grid grid-cols-2 gap-1">
                   {[{c:'#22c55e',l:'0-25%'},{c:'#3b82f6',l:'26-50%'},{c:'#eab308',l:'51-75%'},{c:'#ef4444',l:'76-100%'}].map(x => (
-                    <div key={x.l} className="flex items-center gap-1 text-[9px] text-slate-500">
-                      <div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor:x.c}} />{x.l}
+                    <div key={x.l} className="flex items-center gap-1.5 text-[10px] text-slate-600">
+                      <div className="w-3 h-3 rounded-full shrink-0" style={{backgroundColor:x.c, boxShadow:`0 0 6px ${x.c}40`}} />{x.l}
                     </div>
                   ))}
                 </div>
               </div>
-              {/* Active & Avail */}
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="text-[11px] font-medium text-slate-600 mb-1 block">Status</label>
-                  <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-                    value={markerConfig.activeCol} onChange={e => onMarkerConfigChange({ ...markerConfig, activeCol: e.target.value })}>
-                    <option value="">-- Pilih --</option>
-                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+              {/* Override dropdowns (collapsed by default feel) */}
+              <details className="group">
+                <summary className="text-[10px] text-slate-400 cursor-pointer hover:text-slate-600 transition-colors flex items-center gap-1">
+                  <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
+                  Override kolom manual
+                </summary>
+                <div className="mt-2 space-y-2 pl-1">
+                  <div>
+                    <label className="text-[10px] text-slate-500 mb-0.5 block">Kapasitas (warna)</label>
+                    <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                      value={markerConfig.capacityCol} onChange={e => onMarkerConfigChange({ ...markerConfig, capacityCol: e.target.value })}>
+                      <option value="">-- Pilih --</option>
+                      {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                    </select>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-[10px] text-slate-500 mb-0.5 block">Status</label>
+                      <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                        value={markerConfig.activeCol} onChange={e => onMarkerConfigChange({ ...markerConfig, activeCol: e.target.value })}>
+                        <option value="">-- Pilih --</option>
+                        {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="text-[10px] text-slate-500 mb-0.5 block">Ketersediaan</label>
+                      <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                        value={markerConfig.availCol} onChange={e => onMarkerConfigChange({ ...markerConfig, availCol: e.target.value })}>
+                        <option value="">-- Pilih --</option>
+                        {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-slate-500 mb-0.5 block">Nama Marker (2 kolom)</label>
+                    <div className="flex gap-1 items-center">
+                      <select className="flex-1 h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                        value={markerConfig.nameCol1} onChange={e => onMarkerConfigChange({ ...markerConfig, nameCol1: e.target.value })}>
+                        <option value="">Kolom 1</option>
+                        {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                      <span className="text-slate-300 text-xs">-</span>
+                      <select className="flex-1 h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                        value={markerConfig.nameCol2} onChange={e => onMarkerConfigChange({ ...markerConfig, nameCol2: e.target.value })}>
+                        <option value="">Kolom 2</option>
+                        {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  </div>
                 </div>
-                <div>
-                  <label className="text-[11px] font-medium text-slate-600 mb-1 block">Ketersediaan</label>
-                  <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-                    value={markerConfig.availCol} onChange={e => onMarkerConfigChange({ ...markerConfig, availCol: e.target.value })}>
-                    <option value="">-- Pilih --</option>
-                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-                </div>
-              </div>
+              </details>
             </div>
           )}
         </div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { Menu, MapPin, X, PanelRightClose, Upload, Globe } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { toast } from 'sonner'
@@ -32,11 +32,49 @@ export interface MarkerConfig {
 }
 
 const DEFAULT_MC: MarkerConfig = { nameCol1: '', nameCol2: '', capacityCol: '', activeCol: '', availCol: '' }
-const MC_KEY = 'odp-marker-config'
 
-function loadMC(): MarkerConfig {
-  if (typeof window === 'undefined') return { ...DEFAULT_MC }
-  try { const s = localStorage.getItem(MC_KEY); return s ? { ...DEFAULT_MC, ...JSON.parse(s) } : { ...DEFAULT_MC } } catch { return { ...DEFAULT_MC } }
+// ── AUTO-DETECT: scan kolom Excel dan cocokkan berdasarkan pola nama ──
+
+const CAPACITY_PATTERNS = /capac|kapas|avail|ketersedia|usage|pemakaian|used|terpakai|utilized|penggunaan|penuh|fill|occup|terisi/i
+const ACTIVE_PATTERNS = /^active$|^status$|^enable$|^state$|^aktif$|^kondisi$|^condition$/i
+const NAME1_PATTERNS = /^name$|^nama$|^odp$|^label$|^description$|^deskripsi$|^alamat$|^address$|^location$|^lokasi$/i
+const NAME2_PATTERNS = /^kode$|^code$|^id$|^no$|^number$|^nomor$|^sn$|^serial$/i
+
+function autoDetectConfig(cols: string[]): MarkerConfig {
+  const mc: MarkerConfig = { ...DEFAULT_MC }
+  const lower = cols.map(c => c.toLowerCase().trim())
+
+  // Detect capacity column (highest priority)
+  for (let i = 0; i < cols.length; i++) {
+    if (CAPACITY_PATTERNS.test(lower[i])) { mc.capacityCol = cols[i]; break }
+  }
+
+  // Detect active/status column
+  for (let i = 0; i < cols.length; i++) {
+    if (ACTIVE_PATTERNS.test(lower[i])) { mc.activeCol = cols[i]; break }
+  }
+
+  // Detect avail/ketersediaan column (different from capacity)
+  for (let i = 0; i < cols.length; i++) {
+    if (/^avail|^ketersedia|^available/i.test(lower[i]) && cols[i] !== mc.capacityCol) {
+      mc.availCol = cols[i]; break
+    }
+  }
+
+  // If no separate avail col, reuse capacity or active
+  if (!mc.availCol && mc.capacityCol) mc.availCol = mc.capacityCol
+  if (!mc.availCol && mc.activeCol) mc.availCol = mc.activeCol
+
+  // Detect name columns
+  const usedCols = new Set([mc.capacityCol, mc.activeCol, mc.availCol])
+  for (let i = 0; i < cols.length; i++) {
+    if (!usedCols.has(cols[i]) && NAME1_PATTERNS.test(lower[i])) { mc.nameCol1 = cols[i]; break }
+  }
+  for (let i = 0; i < cols.length; i++) {
+    if (!usedCols.has(cols[i]) && cols[i] !== mc.nameCol1 && NAME2_PATTERNS.test(lower[i])) { mc.nameCol2 = cols[i]; break }
+  }
+
+  return mc
 }
 
 export default function Home() {
@@ -44,6 +82,7 @@ export default function Home() {
   const [stats, setStats] = useState<StatsData | null>(null)
   const [columns, setColumns] = useState<string[]>([])
   const [datasetName, setDatasetName] = useState('')
+  const [datasetId, setDatasetId] = useState('')
   const [coordInfo, setCoordInfo] = useState({ latCol: null as string | null, lngCol: null as string | null, coordCol: null as string | null })
   const [loading, setLoading] = useState(true)
   const [selectedPoint, setSelectedPoint] = useState<DataPoint | null>(null)
@@ -56,17 +95,23 @@ export default function Home() {
   const [customFilters, setCustomFilters] = useState<CustomFilterSlot[]>([
     { field: '', values: [] }, { field: '', values: [] }, { field: '', values: [] },
   ])
-  const [markerConfig, setMarkerConfig] = useState<MarkerConfig>(loadMC)
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') localStorage.setItem(MC_KEY, JSON.stringify(markerConfig))
-  }, [markerConfig])
+  const [markerConfig, setMarkerConfig] = useState<MarkerConfig>(DEFAULT_MC)
+  const autoDetectedRef = useRef(false)
 
   const loadColumns = useCallback(() => {
     fetch('/api/data/columns').then(r => r.json()).then((d: ColumnInfo) => {
-      setColumns(d.columns || [])
+      const cols = d.columns || []
+      setColumns(cols)
       setDatasetName(d.datasetName || '')
+      setDatasetId(d.datasetId || '')
       setCoordInfo({ latCol: d.latCol, lngCol: d.lngCol, coordCol: d.coordCol })
+
+      // Auto-detect marker config from column names
+      if (cols.length > 0) {
+        const detected = autoDetectConfig(cols)
+        setMarkerConfig(detected)
+        autoDetectedRef.current = true
+      }
     }).catch(() => {})
   }, [])
 
