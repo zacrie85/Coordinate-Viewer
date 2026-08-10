@@ -6,9 +6,18 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const search = searchParams.get('search') || ''
   const hasCoord = searchParams.get('hasCoord') || ''
-  const customField = searchParams.get('customField') || ''
-  const customValues = searchParams.get('customValues') || ''
   const limit = parseInt(searchParams.get('limit') || '25000')
+
+  // Parse 3 column filter slots: cf0/cv0, cf1/cv1, cf2/cv2
+  const columnFilters: { field: string; values: string[] }[] = []
+  for (let i = 0; i < 3; i++) {
+    const field = searchParams.get(`cf${i}`) || ''
+    const vals = searchParams.get(`cv${i}`) || ''
+    if (field && vals) {
+      const parsed = vals.split(',').map(v => v.trim()).filter(Boolean)
+      if (parsed.length > 0) columnFilters.push({ field, values: parsed })
+    }
+  }
 
   try {
     const active = await db.dataset.findFirst({ where: { isActive: true } })
@@ -30,12 +39,11 @@ export async function GET(req: NextRequest) {
       ands.push({ metadata: { path: [], string_contains: search } })
     }
 
-    // Dynamic field filter on JSONB
-    if (customField && customValues) {
-      const vals = customValues.split(',').map(v => v.trim()).filter(Boolean)
-      if (vals.length > 0) {
-        ands.push({ OR: vals.map(v => ({ metadata: { path: [customField], string_contains: v } })) })
-      }
+    // Multi-column field filters
+    for (const cf of columnFilters) {
+      ands.push({
+        OR: cf.values.map(v => ({ metadata: { path: [cf.field], string_contains: v } }))
+      })
     }
 
     if (ands.length > 0) where.AND = ands

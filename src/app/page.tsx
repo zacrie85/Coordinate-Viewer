@@ -21,6 +21,12 @@ interface ColumnInfo {
 
 interface StatsData { total: number; withCoord: number; withoutCoord: number; datasetName: string; rowCount: number }
 
+// 3-slot column filter
+export interface CustomFilterSlot {
+  field: string
+  values: string[]
+}
+
 export default function Home() {
   const [points, setPoints] = useState<DataPoint[]>([])
   const [stats, setStats] = useState<StatsData | null>(null)
@@ -33,10 +39,13 @@ export default function Home() {
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [googleEarthOpen, setGoogleEarthOpen] = useState(false)
-  const [customField, setCustomField] = useState('')
-  const [customValues, setCustomValues] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [hasCoord, setHasCoord] = useState('')
+  const [customFilters, setCustomFilters] = useState<CustomFilterSlot[]>([
+    { field: '', values: [] },
+    { field: '', values: [] },
+    { field: '', values: [] },
+  ])
 
   const loadColumns = useCallback(() => {
     fetch('/api/data/columns').then(r => r.json()).then((d: ColumnInfo) => {
@@ -56,15 +65,18 @@ export default function Home() {
     params.set('limit', '25000')
     if (searchQuery) params.set('search', searchQuery)
     if (hasCoord) params.set('hasCoord', hasCoord)
-    if (customField && customValues.length > 0) {
-      params.set('customField', customField)
-      params.set('customValues', customValues.join(','))
-    }
+    // Send all 3 filter slots
+    customFilters.forEach((cf, i) => {
+      if (cf.field && cf.values.length > 0) {
+        params.set(`cf${i}`, cf.field)
+        params.set(`cv${i}`, cf.values.join(','))
+      }
+    })
     fetch(`/api/data?${params}`).then(r => r.json()).then(d => {
       setPoints(d.data || [])
       setLoading(false)
     }).catch(() => { setLoading(false); toast.error('Gagal memuat data') })
-  }, [searchQuery, hasCoord, customField, customValues])
+  }, [searchQuery, hasCoord, customFilters])
 
   const refreshAll = useCallback(() => { loadStats(); loadColumns(); loadData() }, [loadStats, loadColumns, loadData])
 
@@ -72,15 +84,19 @@ export default function Home() {
   useEffect(() => { loadColumns() }, [loadColumns])
   useEffect(() => { loadData() }, [loadData])
 
-  const handleFiltersChange = useCallback((f: { search: string; hasCoord: string; customField: string; customValues: string[] }) => {
-    setSearchQuery(f.search); setHasCoord(f.hasCoord); setCustomField(f.customField); setCustomValues(f.customValues)
+  const handleFiltersChange = useCallback((f: { search: string; hasCoord: string; customFilters: CustomFilterSlot[] }) => {
+    setSearchQuery(f.search)
+    setHasCoord(f.hasCoord)
+    setCustomFilters(f.customFilters)
     setSelectedPoint(null)
   }, [])
 
+  const activeCustomCount = customFilters.reduce((acc, cf) => acc + cf.values.length, 0)
   const filteredWithCoord = points.filter(p => p.latitude !== 0 && p.longitude !== 0).length
 
   return (
     <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
+      {/* Mobile header */}
       <div className="lg:hidden flex items-center justify-between px-4 py-2 bg-white border-b border-slate-200 z-50">
         <div className="flex items-center gap-2">
           <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center"><MapPin className="w-4 h-4 text-emerald-600" /></div>
@@ -95,20 +111,26 @@ export default function Home() {
           <button className="h-8 w-8 flex items-center justify-center rounded hover:bg-slate-100" onClick={() => setMobileSidebar(!mobileSidebar)}><Menu className="w-4 h-4" /></button>
         </div>
       </div>
+
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
+        {/* Mobile sidebar */}
         {mobileSidebar && (
           <div className="lg:hidden fixed inset-0 z-40">
             <div className="absolute inset-0 bg-black/30" onClick={() => setMobileSidebar(false)} />
             <div className="relative z-50 w-80 h-full">
-              <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} customField={customField} customValues={customValues} searchQuery={searchQuery} hasCoord={hasCoord} onFiltersChange={(f) => { handleFiltersChange(f); setMobileSidebar(false) }} onUploadClick={() => { setUploadDialogOpen(true); setMobileSidebar(false) }} onDatasetSwitch={refreshAll} onClose={() => setMobileSidebar(false)} />
+              <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} searchQuery={searchQuery} hasCoord={hasCoord} customFilters={customFilters} onFiltersChange={(f) => { handleFiltersChange(f); setMobileSidebar(false) }} onUploadClick={() => { setUploadDialogOpen(true); setMobileSidebar(false) }} onDatasetSwitch={refreshAll} onClose={() => setMobileSidebar(false)} />
             </div>
           </div>
         )}
+
+        {/* Desktop sidebar */}
         {sidebarOpen && (
           <div className="hidden lg:block shrink-0">
-            <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} customField={customField} customValues={customValues} searchQuery={searchQuery} hasCoord={hasCoord} onFiltersChange={handleFiltersChange} onUploadClick={() => setUploadDialogOpen(true)} onDatasetSwitch={refreshAll} />
+            <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} searchQuery={searchQuery} hasCoord={hasCoord} customFilters={customFilters} onFiltersChange={handleFiltersChange} onUploadClick={() => setUploadDialogOpen(true)} onDatasetSwitch={refreshAll} />
           </div>
         )}
+
+        {/* Map area */}
         <div className="flex-1 relative min-h-0 min-w-0">
           {!sidebarOpen && (
             <button className="absolute top-4 left-4 z-[1000] h-9 w-9 bg-white rounded-lg shadow-lg flex items-center justify-center hover:bg-slate-50" onClick={() => setSidebarOpen(true)}><Menu className="w-4 h-4" /></button>
@@ -116,13 +138,20 @@ export default function Home() {
           {sidebarOpen && (
             <button className="hidden lg:flex absolute top-4 left-[21rem] z-[1000] h-9 w-9 bg-white rounded-lg shadow-lg items-center justify-center hover:bg-slate-50" onClick={() => setSidebarOpen(false)}><PanelRightClose className="w-4 h-4" /></button>
           )}
+
+          {/* Google Earth Export Button - desktop */}
           {stats && stats.total > 0 && (
-            <button className="absolute top-4 right-4 z-[1000] h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-blue-50 text-blue-600 font-medium text-xs transition-colors" onClick={() => setGoogleEarthOpen(true)}>
+            <button
+              className="absolute top-4 right-4 z-[1000] h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-blue-50 text-blue-600 font-medium text-xs transition-colors"
+              onClick={() => setGoogleEarthOpen(true)}
+            >
               <Globe className="w-4 h-4" />
               <span className="hidden sm:inline">Export Google Earth</span>
             </button>
           )}
+
           <ODPMap points={points} loading={loading} selectedPoint={selectedPoint} onSelectPoint={setSelectedPoint} columns={columns} />
+
           {selectedPoint && (
             <div className="hidden md:block absolute right-0 top-0 h-full z-[999]">
               <ODPDetailPanel point={selectedPoint} columns={columns} onClose={() => setSelectedPoint(null)} />
@@ -134,7 +163,9 @@ export default function Home() {
               <ODPDetailPanel point={selectedPoint} columns={columns} onClose={() => setSelectedPoint(null)} />
             </div>
           )}
-          {!loading && points.length === 0 && !stats?.total && !uploadDialogOpen && (
+
+          {/* Empty state */}
+          {!loading && points.length === 0 && !stats?.total && (
             <div className="absolute inset-0 flex items-center justify-center z-[1001]">
               <div className="text-center p-8 bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl max-w-sm">
                 <div className="w-16 h-16 rounded-2xl bg-emerald-100 flex items-center justify-center mx-auto mb-4"><Upload className="w-8 h-8 text-emerald-600" /></div>
@@ -146,11 +177,13 @@ export default function Home() {
           )}
         </div>
       </div>
+
       <UploadExcelDialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen} onUploadComplete={refreshAll} />
+
       <GoogleEarthDialog
         open={googleEarthOpen}
         onOpenChange={setGoogleEarthOpen}
-        filters={{ search: searchQuery, hasCoord, customField, customValues }}
+        filters={{ search: searchQuery, hasCoord, customFilters }}
         filteredCount={filteredWithCoord}
         totalCount={stats?.withCoord || 0}
         datasetName={datasetName}

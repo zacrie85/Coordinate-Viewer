@@ -3,9 +3,10 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   Search, X, ChevronDown, ChevronUp, MapPin, Database, Upload,
-  Trash2, Crosshair, Filter, ArrowUpFromLine, Layers, Eye,
+  Trash2, Crosshair, Filter, ArrowUpFromLine, Layers, Eye, Plus, Minus,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import type { CustomFilterSlot } from '@/app/page'
 
 interface StatsData {
   total: number
@@ -28,7 +29,7 @@ interface DatasetItem {
   id: string
   name: string
   headers: string[]
- latCol: string | null
+  latCol: string | null
   lngCol: string | null
   coordCol: string | null
   rowCount: number
@@ -39,8 +40,7 @@ interface DatasetItem {
 interface FilterValues {
   search: string
   hasCoord: string
-  customField: string
-  customValues: string[]
+  customFilters: CustomFilterSlot[]
 }
 
 interface FilterSidebarProps {
@@ -49,10 +49,9 @@ interface FilterSidebarProps {
   datasetName: string
   coordInfo: { latCol: string | null; lngCol: string | null; coordCol: string | null }
   totalResults: number
-  customField: string
-  customValues: string[]
   searchQuery: string
   hasCoord: string
+  customFilters: CustomFilterSlot[]
   onFiltersChange: (f: FilterValues) => void
   onUploadClick: () => void
   onDatasetSwitch: () => void
@@ -71,17 +70,118 @@ function FilterItem({ value, count, checked, onToggle }: {
   )
 }
 
+// Single column filter slot component
+function ColumnFilterSlot({
+  index,
+  slot,
+  columns,
+  onSlotChange,
+}: {
+  index: number
+  slot: CustomFilterSlot
+  columns: string[]
+  onSlotChange: (index: number, updated: CustomFilterSlot) => void
+}) {
+  const [sectionSearch, setSectionSearch] = useState('')
+  const [fieldValues, setFieldValues] = useState<{ value: string; count: number }[]>([])
+  const [fieldLoading, setFieldLoading] = useState(false)
+
+  // Load field values when slot.field changes
+  useEffect(() => {
+    if (!slot.field) { setFieldValues([]); return }
+    setFieldLoading(true)
+    setSectionSearch('')
+    fetch(`/api/data/field-values?field=${encodeURIComponent(slot.field)}`)
+      .then(r => r.json())
+      .then(data => { setFieldValues(Array.isArray(data) ? data : []); setFieldLoading(false) })
+      .catch(() => setFieldLoading(false))
+  }, [slot.field])
+
+  const toggleValue = (val: string) => {
+    const updated = slot.values.includes(val)
+      ? slot.values.filter(v => v !== val)
+      : [...slot.values, val]
+    onSlotChange(index, { ...slot, values: updated })
+  }
+
+  const clearSlot = () => {
+    setSectionSearch('')
+    onSlotChange(index, { field: '', values: [] })
+  }
+
+  const filteredValues = useMemo(() => {
+    if (!sectionSearch) return fieldValues
+    const q = sectionSearch.toLowerCase()
+    return fieldValues.filter(v => v.value.toLowerCase().includes(q))
+  }, [fieldValues, sectionSearch])
+
+  // Columns available (exclude columns used by other slots)
+  const usedCols = new Set<string>()
+  columns.forEach(() => {}) // just for reference
+
+  return (
+    <div className={`rounded-lg border p-2.5 space-y-2 ${slot.field ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-slate-50/50'}`}>
+      <div className="flex items-center justify-between">
+        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Filter {index + 1}</span>
+        {slot.field && (
+          <button onClick={clearSlot} className="text-slate-400 hover:text-red-500 transition-colors" title="Reset filter ini">
+            <X className="w-3.5 h-3.5" />
+          </button>
+        )}
+      </div>
+
+      <select
+        className="w-full h-8 px-3 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
+        value={slot.field}
+        onChange={(e) => onSlotChange(index, { field: e.target.value, values: [] })}
+      >
+        <option value="">-- Pilih Kolom --</option>
+        {columns.map(c => <option key={c} value={c}>{c}</option>)}
+      </select>
+
+      {slot.field && (
+        fieldLoading ? (
+          <div className="flex items-center justify-center py-3">
+            <div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+            <span className="ml-2 text-[11px] text-slate-400">Memuat...</span>
+          </div>
+        ) : (
+          <>
+            <div className="relative">
+              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
+              <input placeholder="Cari nilai..." className="w-full pl-8 h-7 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500/30 bg-white" value={sectionSearch} onChange={(e) => setSectionSearch(e.target.value)} />
+            </div>
+            <div className="max-h-36 overflow-y-auto space-y-0.5">
+              {filteredValues.slice(0, 50).map(v => (
+                <FilterItem key={v.value} value={v.value} count={v.count} checked={slot.values.includes(v.value)} onToggle={() => toggleValue(v.value)} />
+              ))}
+              {filteredValues.length > 50 && <p className="px-3 py-1 text-[10px] text-slate-400 italic">+ {filteredValues.length - 50} lainnya...</p>}
+              {filteredValues.length === 0 && !fieldLoading && <p className="px-3 py-2 text-xs text-slate-400">Tidak ada data</p>}
+            </div>
+            {slot.values.length > 0 && (
+              <div className="text-[10px] text-emerald-600 font-medium px-1">
+                {slot.values.length} nilai dipilih
+              </div>
+            )}
+          </>
+        )
+      )}
+
+      {!slot.field && (
+        <p className="text-[10px] text-slate-400 px-1">Pilih kolom untuk memfilter</p>
+      )}
+    </div>
+  )
+}
+
 export default function FilterSidebar({
   stats, columns, datasetName, coordInfo, totalResults,
-  customField, customValues, searchQuery, hasCoord,
+  searchQuery, hasCoord, customFilters,
   onFiltersChange, onUploadClick, onDatasetSwitch, onClose
 }: FilterSidebarProps) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     datasets: true, search: true, coordinate: true, filter: true,
   })
-  const [sectionSearch, setSectionSearch] = useState('')
-  const [fieldValues, setFieldValues] = useState<{ value: string; count: number }[]>([])
-  const [fieldLoading, setFieldLoading] = useState(false)
   const [datasets, setDatasets] = useState<DatasetItem[]>([])
 
   const toggleSection = (s: string) => setExpandedSections(p => ({ ...p, [s]: !p[s] }))
@@ -91,32 +191,34 @@ export default function FilterSidebar({
     fetch('/api/datasets').then(r => r.json()).then(setDatasets).catch(() => {})
   }, [])
 
-  // Load field values when customField changes
-  useEffect(() => {
-    if (!customField) { setFieldValues([]); return }
-    setFieldLoading(true)
-    fetch(`/api/data/field-values?field=${encodeURIComponent(customField)}`)
-      .then(r => r.json())
-      .then(data => { setFieldValues(Array.isArray(data) ? data : []); setFieldLoading(false) })
-      .catch(() => setFieldLoading(false))
-  }, [customField])
+  const activeCustomCount = useMemo(() => {
+    return customFilters.reduce((acc, cf) => acc + cf.values.length, 0)
+  }, [customFilters])
 
-  const activeFilterCount = useMemo(() => {
+  const totalFilterCount = useMemo(() => {
     let c = 0
     if (searchQuery) c++
     if (hasCoord) c++
-    if (customValues.length) c++
+    c += activeCustomCount
     return c
-  }, [searchQuery, hasCoord, customValues])
+  }, [searchQuery, hasCoord, activeCustomCount])
 
-  const toggleValue = (val: string) => {
-    const updated = customValues.includes(val) ? customValues.filter(v => v !== val) : [...customValues, val]
-    onFiltersChange({ search: searchQuery, hasCoord, customField, customValues: updated })
+  const handleSlotChange = (index: number, updated: CustomFilterSlot) => {
+    const newFilters = [...customFilters]
+    newFilters[index] = updated
+    onFiltersChange({ search: searchQuery, hasCoord, customFilters: newFilters })
   }
 
   const clearFilters = () => {
-    setSectionSearch('')
-    onFiltersChange({ search: '', hasCoord: '', customField: '', customValues: [] })
+    onFiltersChange({
+      search: '',
+      hasCoord: '',
+      customFilters: [
+        { field: '', values: [] },
+        { field: '', values: [] },
+        { field: '', values: [] },
+      ],
+    })
   }
 
   const activateDataset = async (id: string) => {
@@ -131,12 +233,6 @@ export default function FilterSidebar({
     toast.success('Dataset dihapus')
     onDatasetSwitch()
   }
-
-  const filteredValues = useMemo(() => {
-    if (!sectionSearch) return fieldValues
-    const q = sectionSearch.toLowerCase()
-    return fieldValues.filter(v => v.value.toLowerCase().includes(q))
-  }, [fieldValues, sectionSearch])
 
   return (
     <div className="w-80 bg-white border-r border-slate-200 flex flex-col h-full">
@@ -153,7 +249,7 @@ export default function FilterSidebar({
             </div>
           </div>
           <div className="flex items-center gap-1">
-            {activeFilterCount > 0 && <span className="h-5 px-1.5 text-[10px] bg-emerald-500 text-white rounded-full font-medium">{activeFilterCount}</span>}
+            {totalFilterCount > 0 && <span className="h-5 px-1.5 text-[10px] bg-emerald-500 text-white rounded-full font-medium">{totalFilterCount}</span>}
             {onClose && <button className="lg:hidden h-8 w-8 flex items-center justify-center rounded hover:bg-slate-100" onClick={onClose}><X className="w-4 h-4" /></button>}
           </div>
         </div>
@@ -249,10 +345,10 @@ export default function FilterSidebar({
                 placeholder="Cari di semua kolom..."
                 className="w-full pl-9 pr-8 h-9 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
                 value={searchQuery}
-                onChange={(e) => onFiltersChange({ search: e.target.value, hasCoord, customField, customValues })}
+                onChange={(e) => onFiltersChange({ search: e.target.value, hasCoord, customFilters })}
               />
               {searchQuery && (
-                <button className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" onClick={() => onFiltersChange({ search: '', hasCoord, customField, customValues })}><X className="w-3.5 h-3.5" /></button>
+                <button className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" onClick={() => onFiltersChange({ search: '', hasCoord, customFilters })}><X className="w-3.5 h-3.5" /></button>
               )}
             </div>
           )}
@@ -269,19 +365,23 @@ export default function FilterSidebar({
           {expandedSections.coordinate && stats && (
             <div className="space-y-0.5">
               <FilterItem value="Ada Koordinat" count={stats.withCoord} checked={hasCoord === 'true'}
-                onToggle={() => onFiltersChange({ search: searchQuery, hasCoord: hasCoord === 'true' ? '' : 'true', customField, customValues })} />
+                onToggle={() => onFiltersChange({ search: searchQuery, hasCoord: hasCoord === 'true' ? '' : 'true', customFilters })} />
               <FilterItem value="Tanpa Koordinat" count={stats.withoutCoord} checked={hasCoord === 'false'}
-                onToggle={() => onFiltersChange({ search: searchQuery, hasCoord: hasCoord === 'false' ? '' : 'false', customField, customValues })} />
+                onToggle={() => onFiltersChange({ search: searchQuery, hasCoord: hasCoord === 'false' ? '' : 'false', customFilters })} />
             </div>
           )}
         </div>
 
         <hr className="border-slate-100" />
 
-        {/* DYNAMIC COLUMN FILTER — SEMUA header jadi opsi */}
+        {/* DYNAMIC COLUMN FILTERS — 3 SLOTS */}
         <div>
           <button className="flex items-center justify-between w-full text-sm font-semibold text-slate-700 mb-2" onClick={() => toggleSection('filter')}>
-            <div className="flex items-center gap-2"><Filter className="w-4 h-4" /> Filter Kolom {customValues.length > 0 && <span className="h-4 px-1.5 text-[10px] bg-emerald-500 text-white rounded-full">{customValues.length}</span>}</div>
+            <div className="flex items-center gap-2">
+              <Filter className="w-4 h-4" />
+              Filter Kolom
+              {activeCustomCount > 0 && <span className="h-4 px-1.5 text-[10px] bg-emerald-500 text-white rounded-full">{activeCustomCount}</span>}
+            </div>
             {expandedSections.filter ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
           {expandedSections.filter && (
@@ -289,41 +389,17 @@ export default function FilterSidebar({
               {columns.length === 0 ? (
                 <p className="text-[11px] text-slate-400 px-1">Upload Excel dulu untuk melihat filter kolom</p>
               ) : (
-                <>
-                  <select
-                    className="w-full h-8 px-3 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 mb-2"
-                    value={customField}
-                    onChange={(e) => onFiltersChange({ search: searchQuery, hasCoord, customField: e.target.value, customValues: [] })}
-                  >
-                    <option value="">-- Pilih Kolom --</option>
-                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
-
-                  {customField && (
-                    fieldLoading ? (
-                      <div className="flex items-center justify-center py-4">
-                        <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-                        <span className="ml-2 text-xs text-slate-400">Memuat...</span>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="relative mb-2">
-                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                          <input placeholder="Cari nilai..." className="w-full pl-8 h-7 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500/30" value={sectionSearch} onChange={(e) => setSectionSearch(e.target.value)} />
-                        </div>
-                        <div className="max-h-48 overflow-y-auto space-y-0.5">
-                          {filteredValues.slice(0, 50).map(v => (
-                            <FilterItem key={v.value} value={v.value} count={v.count} checked={customValues.includes(v.value)} onToggle={() => toggleValue(v.value)} />
-                          ))}
-                          {filteredValues.length > 50 && <p className="px-3 py-1 text-[10px] text-slate-400 italic">+ {filteredValues.length - 50} lainnya...</p>}
-                          {filteredValues.length === 0 && !fieldLoading && <p className="px-3 py-2 text-xs text-slate-400">Tidak ada data</p>}
-                        </div>
-                      </>
-                    )
-                  )}
-
-                  {!customField && <p className="text-[10px] text-slate-400 px-1">Pilih kolom di atas untuk memfilter</p>}
-                </>
+                <div className="space-y-3">
+                  {customFilters.map((slot, i) => (
+                    <ColumnFilterSlot
+                      key={i}
+                      index={i}
+                      slot={slot}
+                      columns={columns}
+                      onSlotChange={handleSlotChange}
+                    />
+                  ))}
+                </div>
               )}
             </div>
           )}
@@ -331,10 +407,10 @@ export default function FilterSidebar({
       </div>
 
       {/* Footer */}
-      {activeFilterCount > 0 && (
+      {totalFilterCount > 0 && (
         <div className="p-4 border-t border-slate-200">
           <button className="w-full py-2 border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2" onClick={clearFilters}>
-            <X className="w-3 h-3" /> Hapus Semua Filter ({customValues.length} item)
+            <X className="w-3 h-3" /> Hapus Semua Filter ({totalFilterCount})
           </button>
         </div>
       )}
