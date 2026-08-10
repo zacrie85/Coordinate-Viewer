@@ -6,7 +6,7 @@ import {
   Trash2, Crosshair, Filter, ArrowUpFromLine, Layers, Eye, Plus, Minus,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CustomFilterSlot } from '@/app/page'
+import type { CustomFilterSlot, MarkerConfig } from '@/app/page'
 
 interface StatsData {
   total: number
@@ -52,6 +52,8 @@ interface FilterSidebarProps {
   searchQuery: string
   hasCoord: string
   customFilters: CustomFilterSlot[]
+  markerConfig: MarkerConfig
+  onMarkerConfigChange: (mc: MarkerConfig) => void
   onFiltersChange: (f: FilterValues) => void
   onUploadClick: () => void
   onDatasetSwitch: () => void
@@ -176,11 +178,11 @@ function ColumnFilterSlot({
 
 export default function FilterSidebar({
   stats, columns, datasetName, coordInfo, totalResults,
-  searchQuery, hasCoord, customFilters,
+  searchQuery, hasCoord, customFilters, markerConfig, onMarkerConfigChange,
   onFiltersChange, onUploadClick, onDatasetSwitch, onClose
 }: FilterSidebarProps) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
-    datasets: true, search: true, coordinate: true, filter: true,
+    datasets: true, search: true, coordinate: true, filter: true, display: true,
   })
   const [datasets, setDatasets] = useState<DatasetItem[]>([])
 
@@ -405,6 +407,73 @@ export default function FilterSidebar({
           )}
         </div>
       </div>
+
+        <hr className="border-slate-100" />
+
+        {/* DISPLAY SETTINGS */}
+        <div>
+          <button className="flex items-center justify-between w-full text-sm font-semibold text-slate-700 mb-2" onClick={() => toggleSection('display')}>
+            <div className="flex items-center gap-2"><Eye className="w-4 h-4" /> Pengaturan Tampilan</div>
+            {expandedSections.display ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+          {expandedSections.display && (
+            <div className="space-y-2">
+              <p className="text-[10px] text-slate-400">Atur kolom untuk nama marker, warna kapasitas, dan status.</p>
+              {/* Nama Marker */}
+              <div>
+                <label className="text-[11px] font-medium text-slate-600 mb-1 block">Nama Marker (2 kolom digabung)</label>
+                <div className="flex gap-1 items-center">
+                  <select className="flex-1 h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                    value={markerConfig.nameCol1} onChange={e => onMarkerConfigChange({ ...markerConfig, nameCol1: e.target.value })}>
+                    <option value="">Kolom 1</option>
+                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                  <span className="text-slate-300 text-xs">-</span>
+                  <select className="flex-1 h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                    value={markerConfig.nameCol2} onChange={e => onMarkerConfigChange({ ...markerConfig, nameCol2: e.target.value })}>
+                    <option value="">Kolom 2</option>
+                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+              {/* Capacity */}
+              <div>
+                <label className="text-[11px] font-medium text-slate-600 mb-1 block">Kolom Kapasitas (untuk warna)</label>
+                <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                  value={markerConfig.capacityCol} onChange={e => onMarkerConfigChange({ ...markerConfig, capacityCol: e.target.value })}>
+                  <option value="">-- Pilih --</option>
+                  {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+                <div className="flex gap-1.5 mt-1">
+                  {[{c:'#22c55e',l:'0-25%'},{c:'#3b82f6',l:'26-50%'},{c:'#eab308',l:'51-75%'},{c:'#ef4444',l:'76-100%'}].map(x => (
+                    <div key={x.l} className="flex items-center gap-1 text-[9px] text-slate-500">
+                      <div className="w-2.5 h-2.5 rounded-full" style={{backgroundColor:x.c}} />{x.l}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              {/* Active & Avail */}
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[11px] font-medium text-slate-600 mb-1 block">Status</label>
+                  <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                    value={markerConfig.activeCol} onChange={e => onMarkerConfigChange({ ...markerConfig, activeCol: e.target.value })}>
+                    <option value="">-- Pilih --</option>
+                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-slate-600 mb-1 block">Ketersediaan</label>
+                  <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
+                    value={markerConfig.availCol} onChange={e => onMarkerConfigChange({ ...markerConfig, availCol: e.target.value })}>
+                    <option value="">-- Pilih --</option>
+                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
 
       {/* Footer */}
       {totalFilterCount > 0 && (

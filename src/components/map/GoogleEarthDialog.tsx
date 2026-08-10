@@ -5,7 +5,7 @@ import { Globe, Download, X, Filter, MapPin, Check, Layers } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
-import type { CustomFilterSlot } from '@/app/page'
+import type { CustomFilterSlot, MarkerConfig } from '@/app/page'
 
 interface ActiveFilters {
   search: string
@@ -19,6 +19,7 @@ export default function GoogleEarthDialog({
   open: boolean
   onOpenChange: (v: boolean) => void
   filters: ActiveFilters
+  markerConfig: MarkerConfig
   filteredCount: number
   totalCount: number
   datasetName: string
@@ -68,6 +69,15 @@ export default function GoogleEarthDialog({
         params.set(`cv${i}`, cf.values.join(','))
       }
     })
+    // Marker config params
+    if (filters.markerConfig.nameCol1) params.set('nameCol1', filters.markerConfig.nameCol1)
+    if (filters.markerConfig.nameCol2) params.set('nameCol2', filters.markerConfig.nameCol2)
+    if (filters.markerConfig.capacityCol) params.set('capacityCol', filters.markerConfig.capacityCol)
+    if (filters.markerConfig.activeCol) params.set('activeCol', filters.markerConfig.activeCol)
+    if (filters.markerConfig.availCol) params.set('availCol', filters.markerConfig.availCol)
+    // Group by first active filter column
+    const firstActiveFilter = filters.customFilters.find(cf => cf.field && cf.values.length > 0)
+    if (firstActiveFilter) params.set('groupBy', firstActiveFilter.field)
     return params
   }
 
