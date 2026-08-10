@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { Upload, X, FileSpreadsheet, AlertTriangle, CheckCircle2, Loader2, Database, Crosshair, Eye } from 'lucide-react'
 import { toast } from 'sonner'
 import * as XLSX from 'xlsx'
@@ -28,6 +28,7 @@ export default function UploadExcelDialog({ open, onOpenChange, onUploadComplete
   const [confirmReplace, setConfirmReplace] = useState(false)
   const [datasetName, setDatasetName] = useState('')
   const fileRef = useRef<HTMLInputElement>(null)
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Preview state
   const [preview, setPreview] = useState<{
@@ -136,15 +137,17 @@ export default function UploadExcelDialog({ open, onOpenChange, onUploadComplete
         body: JSON.stringify({ action: 'update-count', datasetId, rowCount: allRows.length }),
       })
 
+      const totalSkippedFinal = totalSkipped
+      const totalInsertedFinal = totalInserted
       setResult({
         totalRows: allRows.length,
-        imported: totalInserted,
-        skipped: totalSkipped,
+        imported: totalInsertedFinal,
+        skipped: totalSkippedFinal,
         datasetName,
         detection: det,
       })
 
-      toast.success(`Berhasil import ${totalInserted.toLocaleString()} data!`)
+      toast.success(`Berhasil import ${totalInsertedFinal.toLocaleString()} data! Dialog tertutup otomatis...`)
       onUploadComplete()
     } catch (err: any) {
       toast.error('Gagal: ' + (err.message || 'Unknown'))
@@ -164,11 +167,33 @@ export default function UploadExcelDialog({ open, onOpenChange, onUploadComplete
     if (fileRef.current) fileRef.current.value = ''
   }
 
-  const handleClose = () => {
+  // Auto-close dialog after successful upload
+  useEffect(() => {
+    if (result && !uploading) {
+      closeTimerRef.current = setTimeout(() => {
+        reset()
+        onOpenChange(false)
+      }, 2500)
+    }
+    return () => {
+      if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
+    }
+  }, [result, uploading])
+
+  // Escape key to close
+  useEffect(() => {
+    if (!open) return
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') handleClose() }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [open])
+
+  const handleClose = useCallback(() => {
     if (uploading) return
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current)
     reset()
     onOpenChange(false)
-  }
+  }, [uploading, onOpenChange])
 
   if (!open) return null
 
@@ -364,14 +389,23 @@ export default function UploadExcelDialog({ open, onOpenChange, onUploadComplete
 
           {/* Result */}
           {result && (
-            <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
-              <div className="text-xs font-bold text-slate-700 mb-2">Hasil Upload</div>
+            <div className="bg-emerald-50 rounded-lg p-3 border border-emerald-200">
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-xs font-bold text-emerald-700">Hasil Upload</div>
+                <span className="text-[10px] text-emerald-500">Auto-tutup 3 detik...</span>
+              </div>
               <div className="space-y-1 text-[11px]">
                 <div className="flex justify-between"><span className="text-slate-500">Dataset</span><span className="font-semibold">{result.datasetName}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">Total baris</span><span className="font-semibold">{result.totalRows?.toLocaleString()}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">Berhasil</span><span className="font-semibold text-emerald-600">{result.imported?.toLocaleString()}</span></div>
                 <div className="flex justify-between"><span className="text-slate-500">Dilewati</span><span className="font-semibold">{result.skipped?.toLocaleString()}</span></div>
               </div>
+              <button
+                onClick={handleClose}
+                className="w-full mt-3 py-2 bg-emerald-600 text-white rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors"
+              >
+                Selesai
+              </button>
             </div>
           )}
 
