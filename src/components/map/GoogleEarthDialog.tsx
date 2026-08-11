@@ -75,9 +75,15 @@ export default function GoogleEarthDialog({
 
   const hasActiveFilters = activeFilterLabels.length > 0
 
-  const getFilterParams = () => {
-    if (exportMode === 'all') return new URLSearchParams()
+    const getFilterParams = () => {
     const params = new URLSearchParams()
+    if (selectedLabelCols.length > 0) params.set('labelCols', selectedLabelCols.join(','))
+    if (markerConfig.nameCol1) params.set('nameCol1', markerConfig.nameCol1)
+    if (markerConfig.nameCol2) params.set('nameCol2', markerConfig.nameCol2)
+    if (markerConfig.capacityCol) params.set('capacityCol', markerConfig.capacityCol)
+    if (markerConfig.activeCol) params.set('activeCol', markerConfig.activeCol)
+    if (markerConfig.availCol) params.set('availCol', markerConfig.availCol)
+    if (exportMode === 'all') return params
     if (filters.search) params.set('search', filters.search)
     if (filters.hasCoord) params.set('hasCoord', filters.hasCoord)
     filters.customFilters.forEach((cf, i) => {
@@ -86,12 +92,6 @@ export default function GoogleEarthDialog({
         params.set(`cv${i}`, cf.values.join(','))
       }
     })
-    if (markerConfig.nameCol1) params.set('nameCol1', markerConfig.nameCol1)
-    if (markerConfig.nameCol2) params.set('nameCol2', markerConfig.nameCol2)
-    if (markerConfig.capacityCol) params.set('capacityCol', markerConfig.capacityCol)
-    if (markerConfig.activeCol) params.set('activeCol', markerConfig.activeCol)
-    if (markerConfig.availCol) params.set('availCol', markerConfig.availCol)
-    if (selectedLabelCols.length > 0) params.set('labelCols', selectedLabelCols.join(','))
     const activeGroupFields = filters.customFilters.filter(cf => cf.field && cf.values.length > 0).map(cf => cf.field)
     if (activeGroupFields.length > 0) params.set('groupBy', activeGroupFields.join(','))
     return params
