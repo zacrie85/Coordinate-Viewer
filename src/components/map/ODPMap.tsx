@@ -26,9 +26,7 @@ interface MapViewProps {
   onSelectPoint: (p: DataPoint | null) => void; columns: string[]; markerConfig: MarkerConfig
 }
 
-// ── Hitung persentase: Active / Capacity × 100 ──
 function calcPct(meta: Record<string, any>, mc: MarkerConfig): { pct: number; activeRaw: string; capRaw: string } {
-  // Prioritas 1: ada kolom Active & Capacity terpisah → bagi
   if (mc.activeCol && mc.capacityCol) {
     const aRaw = String(meta[mc.activeCol] ?? '').trim()
     const cRaw = String(meta[mc.capacityCol] ?? '').trim()
@@ -38,7 +36,6 @@ function calcPct(meta: Record<string, any>, mc: MarkerConfig): { pct: number; ac
       return { pct: (aNum / cNum) * 100, activeRaw: aRaw, capRaw: cRaw }
     }
   }
-  // Prioritas 2: kolom Capacity berisi format "8/12"
   if (mc.capacityCol) {
     const raw = String(meta[mc.capacityCol] ?? '').trim()
     const m = raw.match(/^(\d+)\s*[\/\-]\s*(\d+)$/)
@@ -46,7 +43,6 @@ function calcPct(meta: Record<string, any>, mc: MarkerConfig): { pct: number; ac
       const a = parseInt(m[1]), c = parseInt(m[2])
       if (c > 0) return { pct: (a / c) * 100, activeRaw: m[1], capRaw: m[2] }
     }
-    // Prioritas 3: kolom Capacity berisi persentase langsung "66%"
     const p = raw.match(/^(\d+(?:\.\d+)?)\s*%?$/)
     if (p) return { pct: parseFloat(p[1]), activeRaw: raw, capRaw: '' }
   }
@@ -66,20 +62,13 @@ function getColor(pct: number): string {
   return '#10b981'
 }
 
-function statusColor(val: string): string {
-  if (!val) return ''
-  const v = val.toUpperCase().trim()
-  if (v === 'ENABLE' || v === 'ACTIVE' || v === 'AVAILABLE' || v === 'UP') return '#22c55e'
-  if (v === 'DISABLE' || v === 'INACTIVE' || v === 'DOWN') return '#ef4444'
-  if (v === 'FULL') return '#ef4444'
-  return '#64748b'
-}
-
 export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, columns, markerConfig }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<any>(null)
   const layerGroupRef = useRef<any>(null)
+  const labelLayerRef = useRef<any>(null)
   const markersRef = useRef<Map<string, any>>(new Map())
+  const refreshLabelsRef = useRef<(() => void) | null>(null)
   const [mapError, setMapError] = useState<string | null>(null)
   const [mapReady, setMapReady] = useState(false)
   const pointsRef = useRef(points)
@@ -88,7 +77,15 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
   const mcRef = useRef(markerConfig)
   useEffect(() => { mcRef.current = markerConfig }, [markerConfig])
 
-  // Init map
+  // Extract code (pakai yang lebih pendek antara nameCol1/nameCol2)
+  const getCode = (meta: Record<string, any>): string => {
+    const mc = mcRef.current
+    const n1 = mc.nameCol1 ? String(meta[mc.nameCol1] || '').trim() : ''
+    const n2 = mc.nameCol2 ? String(meta[mc.nameCol2] || '').trim() : ''
+    if (n1 && n2) return n1.length <= n2.length ? n1 : n2
+    return n1 || n2
+  }
+
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
     let destroyed = false
@@ -109,69 +106,65 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>', maxZoom: 19,
         }).addTo(map)
         const layerGroup = leaflet.layerGroup().addTo(map)
+        const labelLayer = leaflet.layerGroup().addTo(map)
         map.fitBounds([[-8, 95], [6, 141]])
-        if (!destroyed) { mapRef.current = map; layerGroupRef.current = layerGroup; setMapReady(true) }
+
+        // CSS untuk label
+        if (!document.querySelector('#odp-label-style')) {
+          const st = document.createElement('style'); st.id = 'odp-label-style'
+          st.textContent = `.odp-lbl{position:absolute;white-space:nowrap;font-size:10px;font-weight:600;font-family:system-ui,sans-serif;color:#1e293b;pointer-events:none;text-shadow:1px 1px 2px #fff,-1px -1px 2px #fff,1px -1px 2px #fff,-1px 1px 2px #fff,0 0 4px #fff;transform:translate(8px,-50%);line-height:1;}`
+          document.head.appendChild(st)
+        }
+
+        // Label hanya muncul zoom >= 14, hanya titik yang terlihat di viewport
+        const refreshLabels = () => {
+          labelLayer.clearLayers()
+          if (map.getZoom() < 14) return
+          const bounds = map.getBounds()
+          const pad = 0.002
+          for (const pt of pointsRef.current) {
+            if (pt.latitude === 0 && pt.longitude === 0) continue
+            if (pt.latitude < bounds.getSouth() - pad || pt.latitude > bounds.getNorth() + pad) continue
+            if (pt.longitude < bounds.getWest() - pad || pt.longitude > bounds.getEast() + pad) continue
+            const code = getCode(pt.metadata || {})
+            if (!code) continue
+            const icon = leaflet.divIcon({
+              className: '',
+              html: `<div class="odp-lbl">${code}</div>`,
+              iconSize: [0, 0],
+              iconAnchor: [6, 0],
+            })
+            const m = leaflet.marker([pt.latitude, pt.longitude], { icon, interactive: false })
+            labelLayer.addLayer(m)
+          }
+        }
+
+        map.on('zoomend', refreshLabels)
+        map.on('moveend', refreshLabels)
+        refreshLabelsRef.current = refreshLabels
+
+        if (!destroyed) { mapRef.current = map; layerGroupRef.current = layerGroup; labelLayerRef.current = labelLayer; setMapReady(true) }
       } catch (err) {
         console.error('Map init error:', err)
         if (!destroyed) setMapError('Gagal memuat peta')
       }
     }
     init()
-    return () => { destroyed = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; layerGroupRef.current = null; markersRef.current.clear() } }
+    return () => { destroyed = true; if (mapRef.current) { mapRef.current.remove(); mapRef.current = null; layerGroupRef.current = null; labelLayerRef.current = null; markersRef.current.clear() } }
   }, [])
 
-  // Build popup
+  // Popup: CODE + ACTIVE/CAPACITY saja
   const buildPopup = useCallback((point: DataPoint): string => {
-    const mc = mcRef.current
     const meta = point.metadata || {}
-    const { pct, activeRaw, capRaw } = calcPct(meta, mc)
-    const pctRound = pct >= 0 ? Math.round(pct) : -1
-    const pctColor = getColor(pct)
-
-    // Combined name
-    const name1 = mc.nameCol1 ? String(meta[mc.nameCol1] || '') : ''
-    const name2 = mc.nameCol2 ? String(meta[mc.nameCol2] || '') : ''
-    const combinedName = [name1, name2].filter(Boolean).join(' - ') || Object.entries(meta).find(([, v]) => v && v !== '')?.[0] || 'Point'
-
-    // Status
-    const activeVal = mc.activeCol ? String(meta[mc.activeCol] || '') : ''
-    const availVal = mc.availCol ? String(meta[mc.availCol] || '') : ''
-    const aColor = statusColor(activeVal)
-
-    // Skip config cols from other metadata
-    const skipCols = new Set<string>([mc.nameCol1, mc.nameCol2, mc.capacityCol, mc.activeCol, mc.availCol].filter(Boolean))
-    const otherCols = columns.filter(c => !skipCols.has(c) && meta[c] && meta[c] !== '').slice(0, 6)
-
-    let html = `<div style="min-width:260px;max-width:320px;font-family:system-ui,-apple-system,sans-serif;">`
-    // Title
-    html += `<div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:4px;line-height:1.3;">${combinedName}</div>`
-    // Code + Status + Capacity row
-    html += `<div style="display:flex;align-items:center;gap:6px;font-size:11px;margin-bottom:4px;">`
-    if (activeVal) html += `<span style="color:${aColor};font-weight:700;">${activeVal}</span>`
-    if (pct >= 0) {
-      html += `<span style="color:#64748b;">/</span>`
-      html += `<span style="font-weight:700;color:#334155;">${capRaw || activeRaw}</span>`
-      html += `<span style="margin-left:auto;font-weight:800;color:${pctColor};font-size:12px;">${pctRound}%</span>`
-    }
-    html += `</div>`
-    // Capacity bar
-    if (pct >= 0) {
-      html += `<div style="background:#e2e8f0;border-radius:4px;height:6px;overflow:hidden;margin-bottom:6px;"><div style="background:${pctColor};height:100%;width:${Math.min(pctRound, 100)}%;border-radius:4px;"></div></div>`
-    }
-    // Other metadata
-    if (otherCols.length > 0) {
-      html += `<div style="border-top:1px solid #f1f5f9;margin-top:4px;padding-top:6px;">`
-      for (const c of otherCols) {
-        html += `<div style="font-size:11px;color:#64748b;margin-bottom:2px;"><span style="color:#94a3b8;">${c}:</span> ${String(meta[c]).substring(0, 60)}</div>`
-      }
-      html += `</div>`
-    }
-    html += `<div style="font-size:10px;color:#94a3b8;margin-top:6px;">${point.latitude}, ${point.longitude}</div>`
-    html += `</div>`
+    const { activeRaw, capRaw } = calcPct(meta, mcRef.current)
+    const code = getCode(meta)
+    let html = `<div style="min-width:160px;font-family:system-ui,sans-serif;">`
+    if (code) html += `<div style="font-size:13px;font-weight:700;color:#1e293b;margin-bottom:4px;">${code}</div>`
+    if (activeRaw && capRaw) html += `<div style="font-size:14px;font-weight:600;color:#334155;">${activeRaw} / ${capRaw}</div>`
+    html += `<div style="font-size:10px;color:#94a3b8;margin-top:6px;">${point.latitude}, ${point.longitude}</div></div>`
     return html
-  }, [columns])
+  }, [])
 
-  // Capacity stats for legend
   const capStats = useMemo(() => {
     if (!markerConfig.activeCol || !markerConfig.capacityCol) return null
     let g = 0, b = 0, y = 0, r = 0, na = 0
@@ -186,7 +179,6 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
     return { green: g, blue: b, yellow: y, red: r, na }
   }, [points, markerConfig.activeCol, markerConfig.capacityCol])
 
-  // Update markers
   useEffect(() => {
     if (!mapReady || !layerGroupRef.current || !L) return
     const layer = layerGroupRef.current
@@ -212,6 +204,9 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
       markersRef.current.set(point.id, marker)
       hasValid = true
     }
+    // Refresh labels setelah marker update
+    if (refreshLabelsRef.current) refreshLabelsRef.current()
+    // Auto-fit bounds
     if (hasValid && pointsRef.current.length > 0 && !selectedPoint) {
       const valid = pointsRef.current.filter(p => p.latitude !== 0 && p.longitude !== 0)
       if (valid.length > 0) {
@@ -221,7 +216,6 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
     }
   }, [mapReady, selectedPoint, stableSelect, points.length, columns, buildPopup])
 
-  // Highlight selected
   useEffect(() => {
     if (!mapRef.current || !selectedPoint) return
     if (selectedPoint.latitude === 0 && selectedPoint.longitude === 0) return
@@ -243,7 +237,6 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
   return (
     <div className="absolute inset-0">
       <div ref={containerRef} className="w-full h-full" />
-      {/* Legend */}
       <div className="absolute bottom-4 left-4 z-[1000] bg-white/95 backdrop-blur-sm rounded-lg shadow-lg p-3 text-xs space-y-1.5">
         <div className="font-semibold text-slate-700">Titik Data: {totalCoord.toLocaleString()}</div>
         {capStats && markerConfig.activeCol && markerConfig.capacityCol ? (
@@ -274,7 +267,6 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
           </div>
         )}
       </div>
-      {/* Loading */}
       {loading && !mapReady && (
         <div className="absolute inset-0 z-[1001] bg-white/60 backdrop-blur-sm flex items-center justify-center">
           <div className="flex flex-col items-center gap-3">
