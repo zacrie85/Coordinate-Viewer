@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Globe, Download, X, Filter, MapPin, Check, Layers, FolderTree, Folder } from 'lucide-react'
+import { Globe, Download, X, Filter, MapPin, Check, Layers, ListTree, Folder } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
@@ -278,7 +278,7 @@ export default function GoogleEarthDialog({ open, onOpenChange, filters, filtere
           {groupByFields.length > 0 && exportMode === 'filtered' && (
             <div className="bg-emerald-50/60 rounded-lg p-3 border border-emerald-100">
               <div className="flex items-center gap-1.5 mb-2">
-                <FolderTree className="w-3 h-3 text-emerald-600" />
+                <ListTree className="w-3 h-3 text-emerald-600" />
                 <span className="text-[11px] font-semibold text-emerald-700">Struktur Folder KML</span>
               </div>
               <div className="text-[11px] text-emerald-600 space-y-1 ml-1">
