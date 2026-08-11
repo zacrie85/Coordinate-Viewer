@@ -8,7 +8,6 @@ function escapeXml(s: string): string {
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 }
 
-// ── Hitung persentase: Active / Capacity × 100 ──
 function calcPct(meta: Record<string, any>, activeCol: string, capacityCol: string): { pct: number; activeRaw: string; capRaw: string } {
   if (activeCol && capacityCol) {
     const aRaw = String(meta[activeCol] ?? '').trim()
@@ -94,16 +93,14 @@ export async function GET(req: NextRequest) {
 
     const points = await db.dataPoint.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 })
 
-            const BASE_ICON = 'http://maps.google.com/mapfiles/kml/paddle/wht-circle.png'
+    const BASE_ICON = 'http://maps.google.com/mapfiles/kml/paddle/wht-circle.png'
+    const styles = '<Style id="s-default"><IconStyle><color>ffa0a0a0</color><scale>0.7</scale><Icon><href>' + BASE_ICON + '</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>'
+      + '<Style id="s-g"><IconStyle><color>ff5ec522</color><scale>0.7</scale><Icon><href>' + BASE_ICON + '</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>'
+      + '<Style id="s-b"><IconStyle><color>fff6823b</color><scale>0.7</scale><Icon><href>' + BASE_ICON + '</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>'
+      + '<Style id="s-y"><IconStyle><color>ff08b3ea</color><scale>0.7</scale><Icon><href>' + BASE_ICON + '</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>'
+      + '<Style id="s-r"><IconStyle><color>ff4444ef</color><scale>0.7</scale><Icon><href>' + BASE_ICON + '</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>'
 
-    const styles = `
-    <Style id="s-default"><IconStyle><color>ffa0a0a0</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>
-    <Style id="s-g"><IconStyle><color>ff5ec522</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>
-    <Style id="s-b"><IconStyle><color>fff6823b</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>
-    <Style id="s-y"><IconStyle><color>ff08b3ea</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>
-    <Style id="s-r"><IconStyle><color>ff4444ef</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>
-
-        const groupFields = groupBy ? groupBy.split(',').map(v => v.trim()).filter(Boolean) : []
+    const groupFields = groupBy ? groupBy.split(',').map(v => v.trim()).filter(Boolean) : []
 
     function buildPctFolders(pts: any[], indent: string): string {
       const buckets: Record<string, any[]> = { '0-25%': [], '26-50%': [], '51-75%': [], '76-100%': [] }
