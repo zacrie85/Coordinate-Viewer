@@ -75,7 +75,7 @@ export default function GoogleEarthDialog({
 
   const hasActiveFilters = activeFilterLabels.length > 0
 
-    const getFilterParams = () => {
+      const getFilterParams = () => {
     const params = new URLSearchParams()
     if (selectedLabelCols.length > 0) params.set('labelCols', selectedLabelCols.join(','))
     if (markerConfig.nameCol1) params.set('nameCol1', markerConfig.nameCol1)
