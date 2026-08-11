@@ -226,11 +226,12 @@ export default function Home() {
 
       <UploadExcelDialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen} onUploadComplete={refreshAll} />
 
-      <GoogleEarthDialog
+            <GoogleEarthDialog
         open={googleEarthOpen} onOpenChange={setGoogleEarthOpen}
         filters={{ search: searchQuery, hasCoord, customFilters }}
         markerConfig={markerConfig}
         filteredCount={filteredWithCoord} totalCount={stats?.withCoord || 0} datasetName={datasetName}
+        columns={columns}
       />
     </div>
   )
