@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Globe, Download, X, Filter, MapPin, Check, Layers } from 'lucide-react'
+import { Globe, Download, X, Filter, MapPin, Check, Layers, Folder } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
@@ -76,8 +76,8 @@ export default function GoogleEarthDialog({
     if (markerConfig.activeCol) params.set('activeCol', markerConfig.activeCol)
     if (markerConfig.availCol) params.set('availCol', markerConfig.availCol)
     // Group by first active filter column
-    const firstActiveFilter = filters.customFilters.find(cf => cf.field && cf.values.length > 0)
-    if (firstActiveFilter) params.set('groupBy', firstActiveFilter.field)
+    const activeGroupFields = filters.customFilters.filter(cf => cf.field && cf.values.length > 0).map(cf => cf.field)
+    if (activeGroupFields.length > 0) params.set('groupBy', activeGroupFields.join(','))
     return params
   }
 

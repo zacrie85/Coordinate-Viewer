@@ -101,22 +101,52 @@ export async function GET(req: NextRequest) {
     <Style id="s-y"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
     <Style id="s-r"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>`
 
-    let foldersXml = ''
-    if (groupBy && points.length > 0) {
-      const groups = new Map<string, any[]>()
-      for (const p of points) {
+        const groupFields = groupBy ? groupBy.split(',').map(v => v.trim()).filter(Boolean) : []
+
+    function buildPctFolders(pts: any[], indent: string): string {
+      const buckets: Record<string, any[]> = { '0-25%': [], '26-50%': [], '51-75%': [], '76-100%': [] }
+      for (const p of pts) {
         const m = (p.metadata as Record<string, any>) || {}
-        const key = String(m[groupBy] || '(kosong)')
+        const { pct } = calcPct(m, mc.activeCol, mc.capacityCol)
+        if (pct < 0 || pct <= 25) buckets['0-25%'].push(p)
+        else if (pct <= 50) buckets['26-50%'].push(p)
+        else if (pct <= 75) buckets['51-75%'].push(p)
+        else buckets['76-100%'].push(p)
+      }
+      let xml = ''
+      for (const [label, items] of Object.entries(buckets)) {
+        if (items.length === 0) continue
+        const marks = items.map((p, i) => buildPlacemark(p, mc, i, (p.metadata as Record<string, any>) || {})).join('\n')
+        xml += `${indent}<Folder><name>${label} (${items.length})</name>\n${marks}\n${indent}</Folder>\n`
+      }
+      return xml
+    }
+
+    function buildGroupFolders(pts: any[], fields: string[], indent: string): string {
+      if (fields.length === 0) return buildPctFolders(pts, indent)
+      const field = fields[0]
+      const remaining = fields.slice(1)
+      const groups = new Map<string, any[]>()
+      for (const p of pts) {
+        const m = (p.metadata as Record<string, any>) || {}
+        const key = String(m[field] || '(kosong)')
         if (!groups.has(key)) groups.set(key, [])
         groups.get(key)!.push(p)
       }
+      let xml = ''
       for (const [groupName, groupPoints] of groups) {
-        const marks = groupPoints.map((p, i) => buildPlacemark(p, mc, i, (p.metadata as Record<string, any>) || {})).join('\n')
-        foldersXml += `    <Folder><name>${escapeXml(`${groupBy}: ${groupName}`)}</name><description>${groupPoints.length} titik</description>\n${marks}\n    </Folder>\n`
+        xml += `${indent}<Folder><name>${escapeXml(groupName)} (${groupPoints.length})</name>\n`
+        xml += buildGroupFolders(groupPoints, remaining, indent + '  ')
+        xml += `${indent}</Folder>\n`
       }
+      return xml
+    }
+
+    let foldersXml = ''
+    if (groupFields.length > 0 && points.length > 0) {
+      foldersXml = buildGroupFolders(points, groupFields, '    ')
     } else {
-      const marks = points.map((p, i) => buildPlacemark(p, mc, i, (p.metadata as Record<string, any>) || {})).join('\n')
-      foldersXml = `    <Folder><name>${escapeXml(active.name)}</name>\n${marks}\n    </Folder>\n`
+      foldersXml = buildPctFolders(points, '    ')
     }
 
     const kml = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>${escapeXml(active.name)}</name>\n    <description>${escapeXml(active.name)} - ${points.length} titik</description>\n${styles}\n${foldersXml}  </Document>\n</kml>`
