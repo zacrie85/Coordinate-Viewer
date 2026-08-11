@@ -28,30 +28,68 @@ function calcPct(meta: Record<string, any>, activeCol: string, capacityCol: stri
   return { pct: -1, activeRaw: '', capRaw: '' }
 }
 
+function getPctColor(pct: number): string {
+  if (pct < 0) return '#94a3b8'
+  if (pct <= 25) return '#22c55e'
+  if (pct <= 50) return '#3b82f6'
+  if (pct <= 75) return '#eab308'
+  return '#ef4444'
+}
+
 function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capacityCol: string; activeCol: string; availCol: string }, i: number, meta: Record<string, any>): string {
-  const descParts: string[] = []
   const { pct, activeRaw, capRaw } = calcPct(meta, mc.activeCol, mc.capacityCol)
-  if (pct >= 0) {
-    descParts.push(`<b>${escapeXml(mc.activeCol || 'Active')}:</b> ${escapeXml(activeRaw)}`)
-    descParts.push(`<b>${escapeXml(mc.capacityCol || 'Capacity')}:</b> ${escapeXml(capRaw)}`)
-    descParts.push(`<b>Persentase:</b> ${Math.round(pct)}%`)
-  }
-  if (mc.availCol && meta[mc.availCol] && mc.availCol !== mc.activeCol) descParts.push(`<b>${escapeXml(mc.availCol)}:</b> ${escapeXml(String(meta[mc.availCol]))}`)
-  const skipCols = new Set([mc.nameCol1, mc.nameCol2, mc.capacityCol, mc.activeCol, mc.availCol].filter(Boolean))
-  for (const [k, v] of Object.entries(meta)) {
-    if (skipCols.has(k) || !v || v === '') continue
-    descParts.push(`<b>${escapeXml(k)}:</b> ${escapeXml(String(v))}`)
-  }
+  const pctRound = pct >= 0 ? Math.round(pct) : -1
+  const color = getPctColor(pct)
+
   const name = mc.nameCol1 && meta[mc.nameCol1]
     ? [meta[mc.nameCol1], mc.nameCol2 ? meta[mc.nameCol2] : ''].filter(Boolean).join(' - ')
     : meta['name'] || meta['Name'] || meta['NAMA'] || meta['nama'] || meta['KODE'] || meta['kode'] || `Point ${i + 1}`
-  const styleUrl = pct >= 0 ? `#s-${pct <= 25 ? 'g' : pct <= 50 ? 'b' : pct <= 75 ? 'y' : 'r'}` : '#s-default'
-  return `      <Placemark>
-        <name>${escapeXml(String(name))}</name>
-        <description><![CDATA[${descParts.join('<br/>')}]]></description>
-        <styleUrl>${styleUrl}</styleUrl>
-        <Point><coordinates>${p.longitude},${p.latitude},0</coordinates></Point>
-      </Placemark>`
+
+  const skipCols = new Set([mc.nameCol1, mc.nameCol2, mc.capacityCol, mc.activeCol, mc.availCol].filter(Boolean))
+
+  let infoRows = ''
+  if (pct >= 0) {
+    infoRows += '<tr><td style="padding:5px 12px 5px 0;color:#94a3b8;font-size:12px;white-space:nowrap;vertical-align:top;">' + escapeXml(mc.activeCol || 'Active') + '</td><td style="padding:5px 0;color:#1e293b;font-size:13px;font-weight:600;">' + escapeXml(activeRaw) + '</td></tr>'
+    infoRows += '<tr><td style="padding:5px 12px 5px 0;color:#94a3b8;font-size:12px;white-space:nowrap;vertical-align:top;">' + escapeXml(mc.capacityCol || 'Capacity') + '</td><td style="padding:5px 0;color:#1e293b;font-size:13px;font-weight:600;">' + escapeXml(capRaw) + '</td></tr>'
+  }
+  if (mc.availCol && meta[mc.availCol] && mc.availCol !== mc.activeCol) {
+    infoRows += '<tr><td style="padding:5px 12px 5px 0;color:#94a3b8;font-size:12px;white-space:nowrap;vertical-align:top;">' + escapeXml(mc.availCol) + '</td><td style="padding:5px 0;color:#1e293b;font-size:13px;font-weight:600;">' + escapeXml(String(meta[mc.availCol])) + '</td></tr>'
+  }
+  for (const [k, v] of Object.entries(meta)) {
+    if (skipCols.has(k) || !v || v === '') continue
+    infoRows += '<tr><td style="padding:5px 12px 5px 0;color:#94a3b8;font-size:12px;white-space:nowrap;vertical-align:top;">' + escapeXml(k) + '</td><td style="padding:5px 0;color:#475569;font-size:12px;">' + escapeXml(String(v)) + '</td></tr>'
+  }
+
+  let statsHtml = ''
+  if (pct >= 0) {
+    statsHtml = '<div style="background:rgba(241,245,249,0.85);border-radius:10px;padding:12px 16px;margin:0 0 14px 0;">'
+      + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'
+      + '<span style="color:#64748b;font-size:13px;">Active / Capacity</span>'
+      + '<span style="font-size:20px;font-weight:700;color:' + color + ';">' + pctRound + '%</span>'
+      + '</div>'
+      + '<div style="display:flex;justify-content:space-between;font-size:11px;color:#94a3b8;margin-bottom:6px;">'
+      + '<span>Active: ' + escapeXml(activeRaw) + '</span><span>Capacity: ' + escapeXml(capRaw) + '</span>'
+      + '</div>'
+      + '<div style="background:#e2e8f0;border-radius:6px;height:10px;overflow:hidden;">'
+      + '<div style="background:' + color + ';height:100%;width:' + Math.min(pctRound, 100) + '%;border-radius:6px;"></div>'
+      + '</div></div>'
+  }
+
+  const desc = '<div style="font-family:Segoe UI,Arial,sans-serif;background:rgba(255,255,255,0.92);padding:18px 20px;border-radius:14px;min-width:280px;max-width:400px;">'
+    + '<div style="font-size:15px;font-weight:700;color:#0f172a;margin-bottom:2px;line-height:1.4;">' + escapeXml(String(name)) + '</div>'
+    + '<div style="height:10px;"></div>'
+    + statsHtml
+    + '<table style="width:100%;border-collapse:collapse;">' + infoRows + '</table>'
+    + '</div>'
+
+  const styleUrl = pct >= 0 ? '#s-' + (pct <= 25 ? 'g' : pct <= 50 ? 'b' : pct <= 75 ? 'y' : 'r') : '#s-default'
+
+  return '      <Placemark>\n'
+    + '        <name>' + escapeXml(String(name)) + '</name>\n'
+    + '        <description><![CDATA[' + desc + ']]></description>\n'
+    + '        <styleUrl>' + styleUrl + '</styleUrl>\n'
+    + '        <Point><coordinates>' + p.longitude + ',' + p.latitude + ',0</coordinates></Point>\n'
+    + '      </Placemark>'
 }
 
 export async function GET(req: NextRequest) {
