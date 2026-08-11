@@ -36,16 +36,23 @@ function getPctColor(pct: number): string {
   return '#ef4444'
 }
 
-function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capacityCol: string; activeCol: string; availCol: string }, i: number, meta: Record<string, any>): string {
+function buildPlacemark(p: any, mc: any, i: number, meta: Record<string, any>): string {
   const { pct, activeRaw, capRaw } = calcPct(meta, mc.activeCol, mc.capacityCol)
   const pctRound = pct >= 0 ? Math.round(pct) : -1
   const color = getPctColor(pct)
 
-  const name = mc.nameCol1 && meta[mc.nameCol1]
-    ? [meta[mc.nameCol1], mc.nameCol2 ? meta[mc.nameCol2] : ''].filter(Boolean).join(' - ')
-    : meta['name'] || meta['Name'] || meta['NAMA'] || meta['nama'] || meta['KODE'] || meta['kode'] || `Point ${i + 1}`
+  const labelCols: string[] = mc.labelCols || []
+  let name = ''
+  if (labelCols.length > 0) {
+    name = labelCols.map((col: string) => String(meta[col] || '')).filter(Boolean).join(' - ')
+  }
+  if (!name) {
+    name = mc.nameCol1 && meta[mc.nameCol1]
+      ? [meta[mc.nameCol1], mc.nameCol2 ? meta[mc.nameCol2] : ''].filter(Boolean).join(' - ')
+      : meta['name'] || meta['Name'] || meta['NAMA'] || meta['nama'] || meta['KODE'] || meta['kode'] || `Point ${i + 1}`
+  }
 
-  const skipCols = new Set([mc.nameCol1, mc.nameCol2, mc.capacityCol, mc.activeCol, mc.availCol].filter(Boolean))
+  const skipCols = new Set([mc.nameCol1, mc.nameCol2, mc.capacityCol, mc.activeCol, mc.availCol, ...(labelCols || [])].filter(Boolean))
 
   let infoRows = ''
   if (pct >= 0) {
@@ -102,7 +109,9 @@ export async function GET(req: NextRequest) {
   const activeCol = searchParams.get('activeCol') || ''
   const availCol = searchParams.get('availCol') || ''
   const groupBy = searchParams.get('groupBy') || ''
-  const mc = { nameCol1, nameCol2, capacityCol, activeCol, availCol }
+  const labelColsRaw = searchParams.get('labelCols') || ''
+  const labelCols = labelColsRaw.split(',').map(v => v.trim()).filter(Boolean)
+  const mc = { nameCol1, nameCol2, capacityCol, activeCol, availCol, labelCols }
 
   const columnFilters: { field: string; values: string[] }[] = []
   for (let i = 0; i < 3; i++) {

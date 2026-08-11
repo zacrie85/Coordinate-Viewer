@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Globe, Download, X, Filter, MapPin, Check, Layers, Folder } from 'lucide-react'
+import { Globe, Download, X, Filter, MapPin, Check, Layers, Folder, Plus, Tag } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
@@ -14,7 +14,7 @@ interface ActiveFilters {
 }
 
 export default function GoogleEarthDialog({
-  open, onOpenChange, filters, markerConfig, filteredCount, totalCount, datasetName,
+  open, onOpenChange, filters, markerConfig, filteredCount, totalCount, datasetName, columns,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -23,11 +23,23 @@ export default function GoogleEarthDialog({
   filteredCount: number
   totalCount: number
   datasetName: string
+  columns: string[]
 }) {
   const [refreshMin, setRefreshMin] = useState('5')
   const [hostInput, setHostInput] = useState('')
   const [downloading, setDownloading] = useState<string | null>(null)
   const [exportMode, setExportMode] = useState<'filtered' | 'all'>('filtered')
+  const [selectedLabelCols, setSelectedLabelCols] = useState<string[]>([])
+
+  useEffect(() => {
+    if (open && columns.length > 0) {
+      setSelectedLabelCols(prev => {
+        const valid = prev.filter(c => columns.includes(c))
+        if (valid.length > 0) return valid
+        return [markerConfig.nameCol1, markerConfig.nameCol2].filter(Boolean) as string[]
+      })
+    }
+  }, [open, columns, markerConfig.nameCol1, markerConfig.nameCol2])
 
   useEffect(() => {
     if (open) document.body.style.overflow = 'hidden'
@@ -41,6 +53,12 @@ export default function GoogleEarthDialog({
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [open, onOpenChange])
+
+  const toggleLabelCol = (col: string) => {
+    setSelectedLabelCols(prev =>
+      prev.includes(col) ? prev.filter(c => c !== col) : [...prev, col]
+    )
+  }
 
   const activeFilterLabels = useMemo(() => {
     const labels: { key: string; value: string }[] = []
@@ -62,20 +80,18 @@ export default function GoogleEarthDialog({
     const params = new URLSearchParams()
     if (filters.search) params.set('search', filters.search)
     if (filters.hasCoord) params.set('hasCoord', filters.hasCoord)
-    // Add all 3 filter slots
     filters.customFilters.forEach((cf, i) => {
       if (cf.field && cf.values.length > 0) {
         params.set(`cf${i}`, cf.field)
         params.set(`cv${i}`, cf.values.join(','))
       }
     })
-    // Marker config params
     if (markerConfig.nameCol1) params.set('nameCol1', markerConfig.nameCol1)
     if (markerConfig.nameCol2) params.set('nameCol2', markerConfig.nameCol2)
     if (markerConfig.capacityCol) params.set('capacityCol', markerConfig.capacityCol)
     if (markerConfig.activeCol) params.set('activeCol', markerConfig.activeCol)
     if (markerConfig.availCol) params.set('availCol', markerConfig.availCol)
-    // Group by first active filter column
+    if (selectedLabelCols.length > 0) params.set('labelCols', selectedLabelCols.join(','))
     const activeGroupFields = filters.customFilters.filter(cf => cf.field && cf.values.length > 0).map(cf => cf.field)
     if (activeGroupFields.length > 0) params.set('groupBy', activeGroupFields.join(','))
     return params
@@ -163,6 +179,50 @@ export default function GoogleEarthDialog({
         </div>
 
         <div className="p-4 space-y-4">
+          {/* Label Column Selector */}
+          {columns.length > 0 && (
+            <div className="bg-violet-50 rounded-lg p-3 border border-violet-100">
+              <div className="flex items-center gap-2 mb-2">
+                <Tag className="w-3.5 h-3.5 text-violet-500" />
+                <span className="text-xs font-semibold text-violet-700">Kolom Label</span>
+                <span className="text-[10px] text-violet-400">— nama di Google Earth</span>
+              </div>
+              <p className="text-[10px] text-violet-500 mb-2">Klik kolom untuk pilih sebagai label. Urutan = urutan tampil.</p>
+              {selectedLabelCols.length > 0 && (
+                <div className="flex flex-wrap gap-1 mb-2">
+                  {selectedLabelCols.map((col, idx) => (
+                    <button
+                      key={col}
+                      onClick={() => toggleLabelCol(col)}
+                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-violet-200 text-violet-800 text-[11px] font-semibold border border-violet-300 hover:bg-violet-300 transition-colors"
+                    >
+                      <span className="text-violet-400 text-[9px]">{idx + 1}</span>
+                      {col}
+                      <X className="w-3 h-3 text-violet-500" />
+                    </button>
+                  ))}
+                </div>
+              )}
+              <div className="flex flex-wrap gap-1 max-h-28 overflow-y-auto">
+                {columns.filter(c => !selectedLabelCols.includes(c)).map(col => (
+                  <button
+                    key={col}
+                    onClick={() => toggleLabelCol(col)}
+                    className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded bg-white text-slate-600 text-[10px] border border-slate-200 hover:border-violet-300 hover:text-violet-700 transition-colors"
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                    {col}
+                  </button>
+                ))}
+              </div>
+              {selectedLabelCols.length > 0 && (
+                <div className="mt-2 text-[10px] text-violet-500">
+                  Preview label: <b className="text-violet-700">{selectedLabelCols.join(' - ')}</b>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Export Mode */}
           <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
             <div className="flex items-center gap-2 mb-2">
@@ -332,11 +392,11 @@ export default function GoogleEarthDialog({
           <div className="text-[11px] text-slate-500 space-y-1.5 pt-1">
             <div className="font-semibold text-slate-700 text-xs">Cara pakai:</div>
             <ol className="list-decimal list-inside space-y-0.5">
+              <li>Pilih kolom label (opsional) — tentukan nama yang tampil di Google Earth</li>
               <li>Pilih mode export: <b>Filtered Only</b> atau <b>Semua Data</b></li>
               <li>Download file NetworkLink KML (Cara 1) atau KML Langsung (Cara 2)</li>
               <li>Buka file tersebut dengan Google Earth Pro</li>
               <li>Data akan muncul di peta Google Earth</li>
-              <li>Klik titik untuk melihat detail dari setiap kolom Excel</li>
             </ol>
           </div>
         </div>
