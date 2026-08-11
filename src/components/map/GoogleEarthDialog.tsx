@@ -1,44 +1,40 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Globe, Download, X, Filter, MapPin, Check, Layers, ListTree, Folder } from 'lucide-react'
+import { Globe, Download, X, Filter, MapPin, Check, Layers } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
+import type { CustomFilterSlot, MarkerConfig } from '@/app/page'
 
-interface FilterConfig {
-  region: string[]
-  codeSearch: string
-  activeRanges: string[]
-  capacityRanges: string[]
-  kecamatan: string[]
-  hasCoord: string
-  odpOwner: string[]
-  installStatus: string[]
-  customField: string
-  customValues: string[]
+interface ActiveFilters {
   search: string
+  hasCoord: string
+  customFilters: CustomFilterSlot[]
 }
 
-export default function GoogleEarthDialog({ open, onOpenChange, filters, filteredCount, totalCount }: {
-  open: boolean; onOpenChange: (v: boolean) => void; filters: FilterConfig; filteredCount: number; totalCount: number
+export default function GoogleEarthDialog({
+  open, onOpenChange, filters, markerConfig, filteredCount, totalCount, datasetName,
+}: {
+  open: boolean
+  onOpenChange: (v: boolean) => void
+  filters: ActiveFilters
+  markerConfig: MarkerConfig
+  filteredCount: number
+  totalCount: number
+  datasetName: string
 }) {
   const [refreshMin, setRefreshMin] = useState('5')
   const [hostInput, setHostInput] = useState('')
   const [downloading, setDownloading] = useState<string | null>(null)
   const [exportMode, setExportMode] = useState<'filtered' | 'all'>('filtered')
 
-  // Lock body scroll when open
   useEffect(() => {
-    if (open) {
-      document.body.style.overflow = 'hidden'
-    } else {
-      document.body.style.overflow = ''
-    }
+    if (open) document.body.style.overflow = 'hidden'
+    else document.body.style.overflow = ''
     return () => { document.body.style.overflow = '' }
   }, [open])
 
-  // Close on Escape
   useEffect(() => {
     if (!open) return
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onOpenChange(false) }
@@ -46,64 +42,42 @@ export default function GoogleEarthDialog({ open, onOpenChange, filters, filtere
     return () => window.removeEventListener('keydown', handler)
   }, [open, onOpenChange])
 
-  // Compute active filter labels
   const activeFilterLabels = useMemo(() => {
     const labels: { key: string; value: string }[] = []
-    if (filters.region.length > 0) labels.push({ key: 'Region', value: filters.region.join(', ') })
-    if (filters.codeSearch) labels.push({ key: 'Code', value: `contains "${filters.codeSearch}"` })
-    if (filters.kecamatan.length > 0) labels.push({ key: 'Kecamatan', value: filters.kecamatan.join(', ') })
-    if (filters.odpOwner.length > 0) labels.push({ key: 'Pemilik ODP', value: filters.odpOwner.join(', ') })
-    if (filters.installStatus.length > 0) labels.push({ key: 'Status Instalasi', value: filters.installStatus.join(', ') })
-    if (filters.activeRanges.length > 0) labels.push({ key: 'Range Aktif', value: filters.activeRanges.join(', ') })
-    if (filters.capacityRanges.length > 0) labels.push({ key: 'Range Kapasitas', value: filters.capacityRanges.join(', ') })
-    if (filters.hasCoord === 'true') labels.push({ key: 'Koordinat', value: 'Punya koordinat' })
-    else if (filters.hasCoord === 'false') labels.push({ key: 'Koordinat', value: 'Tanpa koordinat' })
     if (filters.search) labels.push({ key: 'Search', value: `"${filters.search}"` })
-    if (filters.customField && filters.customValues.length > 0) labels.push({ key: filters.customField, value: filters.customValues.join(', ') })
+    if (filters.hasCoord === 'true') labels.push({ key: 'Koordinat', value: 'Ada koordinat' })
+    else if (filters.hasCoord === 'false') labels.push({ key: 'Koordinat', value: 'Tanpa koordinat' })
+    for (const cf of filters.customFilters) {
+      if (cf.field && cf.values.length > 0) {
+        labels.push({ key: cf.field, value: cf.values.join(', ') })
+      }
+    }
     return labels
   }, [filters])
 
   const hasActiveFilters = activeFilterLabels.length > 0
 
-  // Auto-detect active multi-value filters for groupBy
-  const groupByFields = useMemo(() => {
-    const fields: string[] = []
-    if (filters.odpOwner.length > 0) fields.push('odpOwner')
-    if (filters.region.length > 0) fields.push('region')
-    if (filters.kecamatan.length > 0) fields.push('kecamatan')
-    if (filters.installStatus.length > 0) fields.push('installStatus')
-    const allowedCustom = ['vendor', 'locationType', 'city', 'kelurahan', 'status', 'availability', 'provider']
-    if (filters.customField && filters.customValues.length > 0 && allowedCustom.includes(filters.customField)) {
-      if (!fields.includes(filters.customField)) fields.push(filters.customField)
-    }
-    return fields
-  }, [filters])
-
-  // Build filter params based on export mode
   const getFilterParams = () => {
-    if (exportMode === 'all') {
-      const params = new URLSearchParams()
-      if (groupByFields.length > 0) params.set('groupBy', groupByFields.join(','))
-      return params
-    }
+    if (exportMode === 'all') return new URLSearchParams()
     const params = new URLSearchParams()
-    if (filters.region.length) params.set('region', filters.region.join(','))
-    if (filters.codeSearch) params.set('codeSearch', filters.codeSearch)
-    if (filters.activeRanges.length) params.set('activeRanges', filters.activeRanges.join(','))
-    if (filters.capacityRanges.length) params.set('capacityRanges', filters.capacityRanges.join(','))
-    if (filters.kecamatan.length) params.set('kecamatan', filters.kecamatan.join(','))
-    if (filters.hasCoord) params.set('hasCoord', filters.hasCoord)
-    if (filters.odpOwner.length) params.set('odpOwner', filters.odpOwner.join(','))
-    if (filters.installStatus.length) params.set('installStatus', filters.installStatus.join(','))
     if (filters.search) params.set('search', filters.search)
-    if (filters.customField && filters.customValues.length > 0) {
-      params.set('customField', filters.customField)
-      params.set('customValues', filters.customValues.join(','))
-    }
-    // Add groupBy for hierarchical folders
-    if (groupByFields.length > 0) {
-      params.set('groupBy', groupByFields.join(','))
-    }
+    if (filters.hasCoord) params.set('hasCoord', filters.hasCoord)
+    // Add all 3 filter slots
+    filters.customFilters.forEach((cf, i) => {
+      if (cf.field && cf.values.length > 0) {
+        params.set(`cf${i}`, cf.field)
+        params.set(`cv${i}`, cf.values.join(','))
+      }
+    })
+    // Marker config params
+    if (markerConfig.nameCol1) params.set('nameCol1', markerConfig.nameCol1)
+    if (markerConfig.nameCol2) params.set('nameCol2', markerConfig.nameCol2)
+    if (markerConfig.capacityCol) params.set('capacityCol', markerConfig.capacityCol)
+    if (markerConfig.activeCol) params.set('activeCol', markerConfig.activeCol)
+    if (markerConfig.availCol) params.set('availCol', markerConfig.availCol)
+    // Group by first active filter column
+    const firstActiveFilter = filters.customFilters.find(cf => cf.field && cf.values.length > 0)
+    if (firstActiveFilter) params.set('groupBy', firstActiveFilter.field)
     return params
   }
 
@@ -147,8 +121,8 @@ export default function GoogleEarthDialog({ open, onOpenChange, filters, filtere
     }
   }
 
-  const downloadNetworkLink = () => downloadBlob(buildNetworkLinkUrl(), 'odp-realtime.kml', 'networklink')
-  const downloadDirectKml = () => downloadBlob(buildDirectKmlUrl(), 'odp-data.kml', 'direct')
+  const downloadNetworkLink = () => downloadBlob(buildNetworkLinkUrl(), 'data-realtime.kml', 'networklink')
+  const downloadDirectKml = () => downloadBlob(buildDirectKmlUrl(), 'data-export.kml', 'direct')
 
   const copyKmlUrl = () => {
     const base = typeof window !== 'undefined' ? window.location.origin : ''
@@ -169,21 +143,9 @@ export default function GoogleEarthDialog({ open, onOpenChange, filters, filtere
   if (!open) return null
 
   return (
-    <div
-      className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
-      style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0 }}
-    >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50"
-        onClick={() => onOpenChange(false)}
-      />
-
-      {/* Modal */}
-      <div
-        className="relative bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto"
-        style={{ zIndex: 10000 }}
-      >
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4">
+      <div className="absolute inset-0 bg-black/50" onClick={() => onOpenChange(false)} />
+      <div className="relative bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto" style={{ zIndex: 10000 }}>
         {/* Header */}
         <div className="flex items-center justify-between p-4 pb-0">
           <div className="flex items-center gap-2">
@@ -195,16 +157,13 @@ export default function GoogleEarthDialog({ open, onOpenChange, filters, filtere
               <p className="text-[11px] text-slate-400">KML/KMZ dengan filter atau semua data</p>
             </div>
           </div>
-          <button
-            onClick={() => onOpenChange(false)}
-            className="w-7 h-7 rounded-full hover:bg-slate-100 flex items-center justify-center transition-colors"
-          >
+          <button onClick={() => onOpenChange(false)} className="w-7 h-7 rounded-full hover:bg-slate-100 flex items-center justify-center transition-colors">
             <X className="w-4 h-4 text-slate-400" />
           </button>
         </div>
 
         <div className="p-4 space-y-4">
-          {/* Export Mode Toggle */}
+          {/* Export Mode */}
           <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
             <div className="flex items-center gap-2 mb-2">
               <Layers className="w-3.5 h-3.5 text-slate-500" />
@@ -228,7 +187,7 @@ export default function GoogleEarthDialog({ open, onOpenChange, filters, filtere
                 <Filter className={`w-4 h-4 ${exportMode === 'filtered' ? 'text-blue-600' : 'text-slate-400'}`} />
                 <span className={`text-[11px] font-semibold ${exportMode === 'filtered' ? 'text-blue-700' : 'text-slate-600'}`}>Filtered Only</span>
                 <span className="text-lg font-bold text-blue-600">{filteredCount.toLocaleString('id-ID')}</span>
-                <span className="text-[10px] text-slate-400">ODP dengan filter aktif</span>
+                <span className="text-[10px] text-slate-400">Data terfilter</span>
               </button>
               <button
                 onClick={() => setExportMode('all')}
@@ -246,18 +205,18 @@ export default function GoogleEarthDialog({ open, onOpenChange, filters, filtere
                 <MapPin className={`w-4 h-4 ${exportMode === 'all' ? 'text-emerald-600' : 'text-slate-400'}`} />
                 <span className={`text-[11px] font-semibold ${exportMode === 'all' ? 'text-emerald-700' : 'text-slate-600'}`}>Semua Data</span>
                 <span className="text-lg font-bold text-emerald-600">{totalCount.toLocaleString('id-ID')}</span>
-                <span className="text-[10px] text-slate-400">Seluruh ODP</span>
+                <span className="text-[10px] text-slate-400">Seluruh titik</span>
               </button>
             </div>
             {!hasActiveFilters && (
               <p className="text-[10px] text-amber-600 mt-2 flex items-center gap-1">
                 <span className="w-1 h-1 rounded-full bg-amber-500" />
-                Tidak ada filter aktif. Pilih "Semua Data" atau terapkan filter di sidebar terlebih dahulu.
+                Tidak ada filter aktif. Pilih &quot;Semua Data&quot; atau terapkan filter terlebih dahulu.
               </p>
             )}
           </div>
 
-          {/* Active Filters Summary */}
+          {/* Active Filters */}
           {hasActiveFilters && exportMode === 'filtered' && (
             <div className="bg-blue-50/60 rounded-lg p-3 border border-blue-100">
               <div className="flex items-center gap-1.5 mb-2">
@@ -274,34 +233,9 @@ export default function GoogleEarthDialog({ open, onOpenChange, filters, filtere
             </div>
           )}
 
-          {/* Folder Structure Preview */}
-          {groupByFields.length > 0 && exportMode === 'filtered' && (
-            <div className="bg-emerald-50/60 rounded-lg p-3 border border-emerald-100">
-              <div className="flex items-center gap-1.5 mb-2">
-                <ListTree className="w-3 h-3 text-emerald-600" />
-                <span className="text-[11px] font-semibold text-emerald-700">Struktur Folder KML</span>
-              </div>
-              <div className="text-[11px] text-emerald-600 space-y-1 ml-1">
-                {groupByFields.map((f, i) => (
-                  <div key={f} className="flex items-center gap-1.5" style={{ paddingLeft: `${i * 16}px` }}>
-                    <Folder className="w-3 h-3 text-amber-500" />
-                    <span className="font-medium">{f}</span>
-                  </div>
-                ))}
-                <div className="flex flex-col gap-0.5" style={{ paddingLeft: `${groupByFields.length * 16}px` }}>
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-green-500" /><span>0-25%</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-blue-500" /><span>26-50%</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-yellow-500" /><span>51-75%</span></div>
-                  <div className="flex items-center gap-1.5"><div className="w-2.5 h-2.5 rounded-full bg-red-500" /><span>76-100%</span></div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Data count badge on each option */}
           <div className="flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
             <MapPin className="w-3 h-3" />
-            <span><b className="text-slate-700">{displayCount.toLocaleString('id-ID')}</b> titik ODP akan di-export (dengan koordinat)</span>
+            <span><b className="text-slate-700">{displayCount.toLocaleString('id-ID')}</b> titik akan di-export</span>
           </div>
 
           {/* Refresh interval */}
@@ -398,15 +332,12 @@ export default function GoogleEarthDialog({ open, onOpenChange, filters, filtere
           <div className="text-[11px] text-slate-500 space-y-1.5 pt-1">
             <div className="font-semibold text-slate-700 text-xs">Cara pakai:</div>
             <ol className="list-decimal list-inside space-y-0.5">
-              <li>Pilih mode export: <b>Filtered Only</b> (hanya data terfilter) atau <b>Semua Data</b></li>
+              <li>Pilih mode export: <b>Filtered Only</b> atau <b>Semua Data</b></li>
               <li>Download file NetworkLink KML (Cara 1) atau KML Langsung (Cara 2)</li>
               <li>Buka file tersebut dengan Google Earth Pro</li>
-              <li>Data ODP akan muncul di peta Google Earth</li>
-              <li>Klik titik ODP untuk melihat detail (status, kapasitas, vendor, dll)</li>
+              <li>Data akan muncul di peta Google Earth</li>
+              <li>Klik titik untuk melihat detail dari setiap kolom Excel</li>
             </ol>
-            <p className="text-[10px] text-amber-600 mt-2">
-              Penting: Pastikan komputer yang menjalankan Google Earth bisa mengakses server ini (localhost atau IP jaringan).
-            </p>
           </div>
         </div>
       </div>
