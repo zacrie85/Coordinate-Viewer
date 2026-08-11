@@ -31,7 +31,7 @@ export async function GET(req: NextRequest) {
     <name>Realtime Data</name>
     <description>Auto-refresh setiap ${refresh} menit</description>
     <Link>
-      <href>${kmlUrl}</href>
+      <href>${kmlUrl.replace(/&/g, '&amp;')}</href>
       <refreshMode>onInterval</refreshMode>
       <refreshInterval>${refresh}</refreshInterval>
     </Link>
