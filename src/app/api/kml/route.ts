@@ -101,7 +101,7 @@ export async function GET(req: NextRequest) {
     <Style id="s-g"><IconStyle><color>ff5ec522</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
     <Style id="s-b"><IconStyle><color>fff6823b</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
     <Style id="s-y"><IconStyle><color>ff08b3ea</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
-    <Style id="s-r"><IconStyle><color>ff4444ef</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
+        <Style id="s-r"><IconStyle><color>ff4444ef</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>`
 
         const groupFields = groupBy ? groupBy.split(',').map(v => v.trim()).filter(Boolean) : []
 
