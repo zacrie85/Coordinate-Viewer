@@ -94,12 +94,14 @@ export async function GET(req: NextRequest) {
 
     const points = await db.dataPoint.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 })
 
+        const BASE_ICON = 'http://maps.google.com/mapfiles/kml/paddle/wht-circle.png'
+
     const styles = `
-    <Style id="s-default"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
-    <Style id="s-g"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/pushpin-green.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
-    <Style id="s-b"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
-    <Style id="s-y"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
-    <Style id="s-r"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>`
+    <Style id="s-default"><IconStyle><color>ffa0a0a0</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
+    <Style id="s-g"><IconStyle><color>ff5ec522</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
+    <Style id="s-b"><IconStyle><color>fff6823b</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
+    <Style id="s-y"><IconStyle><color>ff08b3ea</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
+    <Style id="s-r"><IconStyle><color>ff4444ef</color><scale>0.7</scale><Icon><href>${BASE_ICON}</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
 
         const groupFields = groupBy ? groupBy.split(',').map(v => v.trim()).filter(Boolean) : []
 
