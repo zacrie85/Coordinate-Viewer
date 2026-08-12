@@ -40,10 +40,9 @@ function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capaci
   const color = pct >= 0 ? pctColor(pct) : '#64748b'
   const rows: string[] = []
 
+  // Data lain saja (Active/Capacity/Persentase sudah di atas via barHtml)
   if (pct >= 0) {
-    rows.push(`<tr><td class="l">${escapeXml(mc.activeCol || 'Active')}</td><td class="v" style="color:${color};font-weight:700;">${escapeXml(activeRaw)}</td></tr>`)
-    rows.push(`<tr><td class="l">${escapeXml(mc.capacityCol || 'Capacity')}</td><td class="v">${escapeXml(capRaw)}</td></tr>`)
-    rows.push(`<tr><td class="l">Persentase</td><td class="v" style="color:${color};font-weight:700;">${Math.round(pct)}%</td></tr>`)
+    // Tidak push Active/Capacity/Persentase ke tabel, sudah di barHtml
   }
   if (mc.availCol && meta[mc.availCol] && mc.availCol !== mc.activeCol) {
     rows.push(`<tr><td class="l">${escapeXml(mc.availCol)}</td><td class="v">${escapeXml(String(meta[mc.availCol]))}</td></tr>`)
@@ -64,31 +63,33 @@ function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capaci
       : meta['name'] || meta['Name'] || meta['NAMA'] || meta['nama'] || meta['KODE'] || meta['kode'] || `Point ${i + 1}`
   }
 
+  // Progress bar + Active/Capacity info di POSISI ATAS
   const barHtml = pct >= 0 ? `
-          <div style="margin-top:10px;padding:8px 10px;background:rgba(255,255,255,0.25);border-radius:5px;border:1px solid rgba(255,255,255,0.4);">
-            <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px;color:#e0e8f0;">
-              <span>${escapeXml(mc.activeCol || 'Active')}: ${escapeXml(activeRaw)} / ${escapeXml(capRaw)}</span>
-              <span style="font-weight:700;color:#ffffff;">${Math.round(pct)}%</span>
-            </div>
-            <div style="background:rgba(0,0,0,0.3);border-radius:4px;height:6px;overflow:hidden;border:1px solid rgba(255,255,255,0.15);">
-              <div style="background:linear-gradient(to bottom,${color},${color});height:100%;width:${Math.min(pct, 100)}%;border-radius:3px;"></div>
-            </div>
-          </div>` : ''
+        <div style="padding:10px 14px;background:rgba(255,255,255,0.15);border-radius:0 0 6px 6px;border:1px solid rgba(255,255,255,0.1);border-top:1px solid rgba(255,255,255,0.2);margin:0 2px 10px 2px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:15px;margin-bottom:6px;color:#e0e8f0;">
+            <span style="font-weight:600;">${escapeXml(mc.activeCol || 'Active')}: <b style="color:#ffffff;">${escapeXml(activeRaw)}</b> / ${escapeXml(capRaw)}</span>
+            <span style="font-size:20px;font-weight:800;color:${color};text-shadow:0 1px 3px rgba(0,0,0,0.4);">${Math.round(pct)}%</span>
+          </div>
+          <div style="background:rgba(0,0,0,0.35);border-radius:5px;height:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.12);">
+            <div style="background:linear-gradient(to bottom,${color}cc,${color});height:100%;width:${Math.min(pct, 100)}%;border-radius:4px;"></div>
+          </div>
+        </div>` : ''
 
   const styleUrl = pct >= 0 ? `#s-${pct <= 25 ? 'g' : pct <= 50 ? 'b' : pct <= 75 ? 'y' : 'r'}` : '#s-default'
   return `      <Placemark>
         <name>${escapeXml(String(name))}</name>
-        <description><![CDATA[<div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;color:#ffffff;min-width:300px;max-height:280px;overflow-y:auto;line-height:1.5;">
+        <description><![CDATA[<div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:16px;color:#ffffff;min-width:405px;max-height:378px;overflow-y:auto;line-height:1.5;">
   <div style="background:linear-gradient(180deg,rgba(80,120,180,0.78) 0%,rgba(40,65,110,0.82) 40%,rgba(20,40,80,0.88) 100%);border:1px solid rgba(160,200,255,0.45);border-radius:8px;padding:0;margin:0;-webkit-box-shadow:0 4px 20px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.25);box-shadow:0 4px 20px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.25);">
     <div style="height:4px;background:linear-gradient(90deg,${color},${color});border-radius:8px 8px 0 0;opacity:0.9;"></div>
     <div style="position:relative;">
       <div style="position:absolute;top:0;left:0;right:0;height:50%;background:linear-gradient(180deg,rgba(255,255,255,0.18) 0%,rgba(255,255,255,0.04) 100%);pointer-events:none;border-radius:0 0 8px 8px;"></div>
-      <div style="padding:14px 16px;position:relative;">
-        <div style="font-size:15px;font-weight:700;color:#ffffff;text-shadow:0 1px 4px rgba(0,0,0,0.4);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.15);letter-spacing:0.3px;">${escapeXml(String(name))}</div>
-        <table style="width:100%;border-collapse:collapse;font-size:12px;">
-          <style>td.l{color:rgba(200,220,255,0.8);padding:3px 10px 3px 0;white-space:nowrap;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;width:40%;}td.v{color:#ffffff;padding:3px 0;font-weight:500;text-shadow:0 1px 2px rgba(0,0,0,0.3);font-size:12px;}tr+tr td{border-top:1px solid rgba(255,255,255,0.06);}</style>
+      <div style="padding:14px 16px 4px 16px;position:relative;">
+        <div style="font-size:18px;font-weight:700;color:#ffffff;text-shadow:0 1px 4px rgba(0,0,0,0.4);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.15);letter-spacing:0.3px;">${escapeXml(String(name))}</div>
+ ${barHtml}
+        <table style="width:100%;border-collapse:collapse;font-size:14px;">
+          <style>td.l{color:rgba(200,220,255,0.8);padding:4px 12px 4px 0;white-space:nowrap;font-size:13px;text-transform:uppercase;letter-spacing:0.5px;width:40%;}td.v{color:#ffffff;padding:4px 0;font-weight:500;text-shadow:0 1px 2px rgba(0,0,0,0.3);font-size:14px;}tr+tr td{border-top:1px solid rgba(255,255,255,0.06);}</style>
           ${rows.join('\n          ')}
-        </table>${barHtml}
+        </table>
       </div>
     </div>
     <div style="height:1px;background:linear-gradient(90deg,transparent,rgba(255,255,255,0.2),transparent);"></div>
@@ -148,15 +149,13 @@ export async function GET(req: NextRequest) {
 
     const points = await db.dataPoint.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 })
 
-    // Icon putih agar warna tinting benar (kuning default × biru = hitam!)
-    // KML color ABGR: kuning label = ff00ffff, hijau = ff00ff00, biru = ffff0000, dll
     const IC = 'http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png'
     const styles = `
-    <Style id="s-default"><IconStyle><scale>1.5</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.5</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.90</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-b"><IconStyle><color>ffff0000</color><scale>1.5</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.90</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.5</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.90</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.5</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.90</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>`
+    <Style id="s-default"><IconStyle><scale>1.0</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.0</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.75</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-b"><IconStyle><color>ffff0000</color><scale>1.0</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.75</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.0</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.75</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.0</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.75</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>`
 
     let foldersXml = ''
     if (groupBy && points.length > 0) {
