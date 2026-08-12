@@ -27,6 +27,21 @@ interface DataPoint {
 interface MapViewProps {
   points: DataPoint[]; loading: boolean; selectedPoint: DataPoint | null
   onSelectPoint: (p: DataPoint | null) => void; columns: string[]; markerConfig: MarkerConfig
+  drawMode?: boolean
+  onAreaSelected?: (ids: Set<string>) => void
+  selectedAreaIds?: Set<string> | null
+}
+
+// ── Point-in-polygon (ray casting) ──
+function pointInPolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
+  let inside = false
+  for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+    const xi = polygon[i][1], yi = polygon[i][0]
+    const xj = polygon[j][1], yj = polygon[j][0]
+    const intersect = ((yi > lng) !== (yj > lng)) && (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi)
+    if (intersect) inside = !inside
+  }
+  return inside
 }
 
 // ── Hitung persentase: Active / Capacity × 100 ──
@@ -72,7 +87,7 @@ function statusColor(val: string): string {
   return '#64748b'
 }
 
-export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, columns, markerConfig }: MapViewProps) {
+export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, columns, markerConfig, drawMode, onAreaSelected, selectedAreaIds }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<any>(null)
   const clusterRef = useRef<any>(null)
@@ -85,6 +100,13 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
   const mcRef = useRef(markerConfig)
   useEffect(() => { mcRef.current = markerConfig }, [markerConfig])
   const buildPopupRef = useRef<(p: DataPoint) => string>(() => '')
+
+  // Drawing state
+  const drawingRef = useRef<any>(null) // L.polyline for in-progress drawing
+  const drawVerticesRef = useRef<[number, number][]>([])
+  const drawLayerRef = useRef<any>(null) // L.layerGroup for polygon
+  const drawModeRef = useRef(drawMode)
+  useEffect(() => { drawModeRef.current = drawMode }, [drawMode])
 
   // Init map with clustering
   useEffect(() => {
@@ -100,7 +122,6 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
           link.setAttribute('data-leaflet-css', 'true'); document.head.appendChild(link)
           await new Promise(r => setTimeout(r, 100))
         }
-        // Add markercluster CSS
         if (!document.querySelector('link[data-cluster-css]')) {
           const link = document.createElement('link'); link.rel = 'stylesheet'
           link.href = 'https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css'
@@ -112,7 +133,6 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
         }
         if (destroyed || !containerRef.current) return
 
-        // Canvas renderer for performance
         const renderer = leaflet.canvas({ padding: 0.5 })
 
         const map = leaflet.map(containerRef.current, {
@@ -124,7 +144,10 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
           attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a>', maxZoom: 19,
         }).addTo(map)
 
-        // Marker cluster group with custom styling
+        // Drawing layer group
+        const drawLayer = leaflet.layerGroup().addTo(map)
+        drawLayerRef.current = drawLayer
+
         const cluster = new CG({
           maxClusterRadius: 50,
           spiderfyOnMaxZoom: true,
@@ -132,12 +155,11 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
           zoomToBoundsOnClick: true,
           iconCreateFunction: (cluster: any) => {
             const count = cluster.getChildCount()
-            let size = 'small'
             let dim = 36
-            if (count > 1000) { size = 'large'; dim = 50 }
-            else if (count > 100) { size = 'medium'; dim = 42 }
+            if (count > 1000) dim = 50
+            else if (count > 100) dim = 42
             return leaflet.divIcon({
-              html: `<div style="background:rgba(16,185,129,0.9);color:white;width:${dim}px;height:${dim}px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:${size === 'large' ? 13 : size === 'medium' ? 12 : 11}px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.3);border:2px solid white;">${count.toLocaleString()}</div>`,
+              html: `<div style="background:rgba(16,185,129,0.9);color:white;width:${dim}px;height:${dim}px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:${dim > 42 ? 13 : 11}px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,0.3);border:2px solid white;">${count.toLocaleString()}</div>`,
               className: '', iconSize: [dim, dim], iconAnchor: [dim/2, dim/2],
             })
           },
@@ -167,7 +189,6 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
     const combinedName = [name1, name2].filter(Boolean).join(' - ') || Object.entries(meta).find(([, v]) => v && v !== '')?.[0] || 'Point'
 
     const activeVal = mc.activeCol ? String(meta[mc.activeCol] || '') : ''
-    const availVal = mc.availCol ? String(meta[mc.availCol] || '') : ''
     const aColor = statusColor(activeVal)
 
     const skipCols = new Set<string>([mc.nameCol1, mc.nameCol2, mc.capacityCol, mc.activeCol, mc.availCol].filter(Boolean))
@@ -200,7 +221,7 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
 
   buildPopupRef.current = buildPopup
 
-  // Capacity stats for legend
+  // Capacity stats
   const capStats = useMemo(() => {
     if (!markerConfig.activeCol || !markerConfig.capacityCol) return null
     let g = 0, b = 0, y = 0, r = 0, na = 0
@@ -215,13 +236,12 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
     return { green: g, blue: b, yellow: y, red: r, na }
   }, [points, markerConfig.activeCol, markerConfig.capacityCol])
 
-  // Update markers using clustering (debounced)
+  // Update markers (debounced)
   const updateTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (!mapReady || !clusterRef.current || !L || !ClusterGroup) return
 
-    // Debounce marker updates to avoid rapid rebuilds during filter changes
     if (updateTimerRef.current) clearTimeout(updateTimerRef.current)
     updateTimerRef.current = setTimeout(() => {
       const cluster = clusterRef.current
@@ -231,29 +251,31 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
 
       const mc = mcRef.current
       const popupFn = buildPopupRef.current
+      const isInArea = selectedAreaIds
 
       for (const point of pointsRef.current) {
         if (point.latitude === 0 && point.longitude === 0) continue
         const { pct } = calcPct(point.metadata || {}, mc)
-        const fillColor = getColor(pct)
+        const isSelected = isInArea ? isInArea.has(point.id) : false
+        const fillColor = isSelected ? '#8b5cf6' : getColor(pct)
 
         const marker = L!.circleMarker([point.latitude, point.longitude], {
-          radius: 5,
+          radius: isSelected ? 7 : 5,
           fillColor,
-          color: fillColor,
-          weight: 1.5,
-          opacity: 1,
-          fillOpacity: 0.75,
+          color: isSelected ? '#7c3aed' : fillColor,
+          weight: isSelected ? 2.5 : 1.5,
+          opacity: isSelected ? 1 : (isInArea ? 0.3 : 1),
+          fillOpacity: isSelected ? 0.9 : (isInArea ? 0.2 : 0.75),
         })
         marker.bindPopup(popupFn(point), { maxWidth: 340, minWidth: 260 })
         marker.on('click', () => stableSelect(point))
         cluster.addLayer(marker)
         markersRef.current.set(point.id, marker)
       }
-    }, 100) // 100ms debounce
+    }, 100)
 
     return () => { if (updateTimerRef.current) clearTimeout(updateTimerRef.current) }
-  }, [mapReady, points, columns, stableSelect])
+  }, [mapReady, points, columns, stableSelect, selectedAreaIds])
 
   // Highlight selected point
   useEffect(() => {
@@ -261,13 +283,10 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
     if (selectedPoint.latitude === 0 && selectedPoint.longitude === 0) return
     const marker = markersRef.current.get(selectedPoint.id)
     if (marker) {
-      // If marker is in a cluster, zoom to it first
       mapRef.current.setView([selectedPoint.latitude, selectedPoint.longitude], 16, { animate: true })
       setTimeout(() => {
-        // Try to open popup after zoom
         if (marker.isPopupOpen) return
         try { marker.openPopup() } catch(e) {
-          // Marker might be in a cluster, try spiderfying
           const cluster = clusterRef.current
           if (cluster && cluster.zoomToShowLayer) {
             cluster.zoomToShowLayer(marker, () => { marker.openPopup() })
@@ -277,7 +296,7 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
     }
   }, [selectedPoint])
 
-  // Fit bounds on first data load
+  // Fit bounds on first load
   const initialFitRef = useRef(false)
   useEffect(() => {
     if (!mapRef.current || !L || initialFitRef.current || points.length === 0 || selectedPoint) return
@@ -288,6 +307,104 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
       initialFitRef.current = true
     }
   }, [points, selectedPoint])
+
+  // ── Polygon drawing ──
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !L) return
+
+    if (drawMode) {
+      map.getContainer().style.cursor = 'crosshair'
+
+      const onClick = (e: any) => {
+        const latlng = e.latlng
+        const vertex: [number, number] = [latlng.lat, latlng.lng]
+        drawVerticesRef.current.push(vertex)
+
+        // Remove old drawing line
+        if (drawingRef.current) map.removeLayer(drawingRef.current)
+
+        // Draw line through all vertices
+        if (drawVerticesRef.current.length > 1) {
+          drawingRef.current = L!.polyline(drawVerticesRef.current, {
+            color: '#8b5cf6', weight: 3, dashArray: '8, 6', opacity: 0.9,
+          }).addTo(map)
+        }
+
+        // Add vertex marker
+        const vertexMarker = L!.circleMarker(vertex, {
+          radius: 5, fillColor: '#8b5cf6', color: '#fff', weight: 2, fillOpacity: 1,
+        }).addTo(drawLayerRef.current)
+        vertexMarker._isDrawVertex = true
+      }
+
+      const onDblClick = (e: any) => {
+        L!.DomEvent.stopPropagation(e)
+        L!.DomEvent.preventDefault(e)
+
+        const vertices = drawVerticesRef.current
+        if (vertices.length < 3) return
+
+        // Close polygon
+        vertices.push(vertices[0])
+
+        // Remove drawing line
+        if (drawingRef.current) { map.removeLayer(drawingRef.current); drawingRef.current = null }
+
+        // Clear vertex markers
+        if (drawLayerRef.current) {
+          drawLayerRef.current.eachLayer((layer: any) => {
+            if (layer._isDrawVertex) drawLayerRef.current.removeLayer(layer)
+          })
+        }
+
+        // Remove closing vertex (duplicate)
+        const closedVerts = vertices.slice(0, -1)
+
+        // Draw filled polygon
+        const polygon = L!.polygon(closedVerts, {
+          color: '#7c3aed', weight: 2, fillColor: '#8b5cf6', fillOpacity: 0.15,
+        }).addTo(drawLayerRef.current)
+
+        // Find points inside polygon using ray casting
+        const ids = new Set<string>()
+        for (const p of pointsRef.current) {
+          if (p.latitude === 0 && p.longitude === 0) continue
+          if (pointInPolygon(p.latitude, p.longitude, closedVerts)) {
+            ids.add(p.id)
+          }
+        }
+
+        onAreaSelected?.(ids)
+
+        // Reset drawing state
+        drawVerticesRef.current = []
+      }
+
+      map.on('click', onClick)
+      map.on('dblclick', onDblClick)
+
+      return () => {
+        map.off('click', onClick)
+        map.off('dblclick', onDblClick)
+        map.getContainer().style.cursor = ''
+        if (drawingRef.current) { map.removeLayer(drawingRef.current); drawingRef.current = null }
+        drawVerticesRef.current = []
+      }
+    } else {
+      // Clear drawing state when exiting draw mode
+      map.getContainer().style.cursor = ''
+      if (drawingRef.current) { map.removeLayer(drawingRef.current); drawingRef.current = null }
+      drawVerticesRef.current = []
+    }
+  }, [drawMode, onAreaSelected])
+
+  // Clear polygon when selectedAreaIds is nullified
+  useEffect(() => {
+    if (selectedAreaIds === null && drawLayerRef.current) {
+      drawLayerRef.current.clearLayers()
+    }
+  }, [selectedAreaIds])
 
   if (mapError) {
     return (
@@ -303,9 +420,17 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
   return (
     <div className="absolute inset-0">
       <div ref={containerRef} className="w-full h-full" />
+
+      {/* Draw mode overlay */}
+      {drawMode && !selectedAreaIds && (
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-[1001] bg-violet-500 text-white px-4 py-2 rounded-full shadow-lg text-xs font-semibold flex items-center gap-2 animate-pulse">
+          Klik untuk menambah titik. Double-click untuk menutup polygon
+        </div>
+      )}
+
       {/* Legend */}
       <div className="absolute bottom-4 left-4 z-[1000] bg-white/95 backdrop-blur-sm rounded-lg shadow-lg p-3 text-xs space-y-1.5">
-        <div className="font-semibold text-slate-700">Titik Data: {totalCoord.toLocaleString()}</div>
+        <div className="font-semibold text-slate-700">Titik Data: {totalCoord.toLocaleString()}{selectedAreaIds && <span className="text-violet-600"> ({selectedAreaIds.size.toLocaleString()} dipilih)</span>}</div>
         {capStats && markerConfig.activeCol && markerConfig.capacityCol ? (
           <div className="space-y-1 pt-1 border-t border-slate-100">
             <div className="text-[10px] text-slate-400 font-medium">{markerConfig.activeCol} / {markerConfig.capacityCol}</div>
@@ -334,6 +459,7 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
           </div>
         )}
       </div>
+
       {/* Loading */}
       {loading && !mapReady && (
         <div className="absolute inset-0 z-[1001] bg-white/60 backdrop-blur-sm flex items-center justify-center">

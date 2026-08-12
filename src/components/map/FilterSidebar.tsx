@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import {
   Search, X, ChevronDown, ChevronUp, MapPin, Database, Upload,
-  Trash2, Crosshair, Filter, ArrowUpFromLine, Layers, Eye,
+  Trash2, Crosshair, Filter, ArrowUpFromLine, Layers, Eye, FileDown, Table2,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { CustomFilterSlot, MarkerConfig } from '@/app/page'
@@ -57,6 +57,8 @@ interface FilterSidebarProps {
   onFiltersChange: (f: FilterValues) => void
   onUploadClick: () => void
   onDatasetSwitch: () => void
+  onExportCsv: () => void
+  onExportExcel?: () => void
   onClose?: () => void
 }
 
@@ -179,7 +181,7 @@ function ColumnFilterSlot({
 export default function FilterSidebar({
   stats, columns, datasetName, coordInfo, totalResults,
   searchQuery, hasCoord, customFilters, markerConfig, onMarkerConfigChange,
-  onFiltersChange, onUploadClick, onDatasetSwitch, onClose
+  onFiltersChange, onUploadClick, onDatasetSwitch, onExportCsv, onExportExcel, onClose
 }: FilterSidebarProps) {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
     datasets: true, search: true, coordinate: true, filter: true, display: true,
@@ -262,10 +264,20 @@ export default function FilterSidebar({
             <div className="w-6 h-6 rounded bg-emerald-500 flex items-center justify-center shrink-0"><ArrowUpFromLine className="w-3.5 h-3.5 text-white" /></div>
             <div className="min-w-0"><div className="text-xs font-semibold text-emerald-800">Upload</div><div className="text-[10px] text-emerald-500">Excel</div></div>
           </button>
-          <button onClick={onUploadClick} className="flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left">
+          <button onClick={onDatasetSwitch} className="flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left">
             <div className="w-6 h-6 rounded bg-blue-500 flex items-center justify-center shrink-0"><Layers className="w-3.5 h-3.5 text-white" /></div>
             <div className="min-w-0"><div className="text-xs font-semibold text-blue-800">Dataset</div><div className="text-[10px] text-blue-500">Switch</div></div>
           </button>
+          <button onClick={onExportCsv} className="flex items-center gap-2 px-3 py-2 bg-amber-50 hover:bg-amber-100 rounded-lg transition-colors text-left">
+            <div className="w-6 h-6 rounded bg-amber-500 flex items-center justify-center shrink-0"><FileDown className="w-3.5 h-3.5 text-white" /></div>
+            <div className="min-w-0"><div className="text-xs font-semibold text-amber-800">Export</div><div className="text-[10px] text-amber-500">CSV</div></div>
+          </button>
+          {onExportExcel && (
+            <button onClick={onExportExcel} className="flex items-center gap-2 px-3 py-2 bg-green-50 hover:bg-green-100 rounded-lg transition-colors text-left">
+              <div className="w-6 h-6 rounded bg-green-600 flex items-center justify-center shrink-0"><Table2 className="w-3.5 h-3.5 text-white" /></div>
+              <div className="min-w-0"><div className="text-xs font-semibold text-green-800">Export</div><div className="text-[10px] text-green-500">Excel</div></div>
+            </button>
+          )}
         </div>
       </div>
 

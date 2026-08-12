@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Menu, MapPin, X, PanelRightClose, Upload, Globe } from 'lucide-react'
+import { Menu, MapPin, X, PanelRightClose, Upload, Globe, FileDown, Pentagon, Table2 } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { toast } from 'sonner'
 
@@ -44,28 +44,23 @@ function autoDetectConfig(cols: string[]): MarkerConfig {
   const mc: MarkerConfig = { ...DEFAULT_MC }
   const lower = cols.map(c => c.toLowerCase().trim())
 
-  // Detect capacity column (highest priority)
   for (let i = 0; i < cols.length; i++) {
     if (CAPACITY_PATTERNS.test(lower[i])) { mc.capacityCol = cols[i]; break }
   }
 
-  // Detect active/status column
   for (let i = 0; i < cols.length; i++) {
     if (ACTIVE_PATTERNS.test(lower[i])) { mc.activeCol = cols[i]; break }
   }
 
-  // Detect avail/ketersediaan column (different from capacity)
   for (let i = 0; i < cols.length; i++) {
     if (/^avail|^ketersedia|^available/i.test(lower[i]) && cols[i] !== mc.capacityCol) {
       mc.availCol = cols[i]; break
     }
   }
 
-  // If no separate avail col, reuse capacity or active
   if (!mc.availCol && mc.capacityCol) mc.availCol = mc.capacityCol
   if (!mc.availCol && mc.activeCol) mc.availCol = mc.activeCol
 
-  // Detect name columns
   const usedCols = new Set([mc.capacityCol, mc.activeCol, mc.availCol])
   for (let i = 0; i < cols.length; i++) {
     if (!usedCols.has(cols[i]) && NAME1_PATTERNS.test(lower[i])) { mc.nameCol1 = cols[i]; break }
@@ -98,6 +93,10 @@ export default function Home() {
   const [markerConfig, setMarkerConfig] = useState<MarkerConfig>(DEFAULT_MC)
   const autoDetectedRef = useRef(false)
 
+  // Area selection state
+  const [drawMode, setDrawMode] = useState(false)
+  const [selectedAreaIds, setSelectedAreaIds] = useState<Set<string> | null>(null)
+
   const loadColumns = useCallback(() => {
     fetch('/api/data/columns').then(r => r.json()).then((d: ColumnInfo) => {
       const cols = d.columns || []
@@ -106,7 +105,6 @@ export default function Home() {
       setDatasetId(d.datasetId || '')
       setCoordInfo({ latCol: d.latCol, lngCol: d.lngCol, coordCol: d.coordCol })
 
-      // Auto-detect marker config from column names
       if (cols.length > 0) {
         const detected = autoDetectConfig(cols)
         setMarkerConfig(detected)
@@ -145,9 +143,140 @@ export default function Home() {
 
   const handleFiltersChange = useCallback((f: { search: string; hasCoord: string; customFilters: CustomFilterSlot[] }) => {
     setSearchQuery(f.search); setHasCoord(f.hasCoord); setCustomFilters(f.customFilters); setSelectedPoint(null)
+    setSelectedAreaIds(null)
   }, [])
 
   const filteredWithCoord = points.filter(p => p.latitude !== 0 && p.longitude !== 0).length
+
+  // Build filter params for export
+  const getExportParams = useCallback(() => {
+    const params = new URLSearchParams()
+    if (searchQuery) params.set('search', searchQuery)
+    if (hasCoord) params.set('hasCoord', hasCoord)
+    customFilters.forEach((cf, i) => {
+      if (cf.field && cf.values.length > 0) {
+        params.set(`cf${i}`, cf.field)
+        params.set(`cv${i}`, cf.values.join(','))
+      }
+    })
+    return params
+  }, [searchQuery, hasCoord, customFilters])
+
+  const handleExportCsv = useCallback(() => {
+    const params = getExportParams()
+    params.set('limit', '50000')
+    params.set('format', 'csv')
+    const url = `/api/data/export?${params}`
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${datasetName.replace(/[^a-zA-Z0-9]/g, '_') || 'data'}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    toast.success('Export CSV dimulai!')
+  }, [getExportParams, datasetName])
+
+  const handleExportExcel = useCallback(() => {
+    const params = getExportParams()
+    params.set('limit', '50000')
+    params.set('format', 'xlsx')
+    const url = `/api/data/export?${params}`
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${datasetName.replace(/[^a-zA-Z0-9]/g, '_') || 'data'}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    toast.success('Export Excel dimulai!')
+  }, [getExportParams, datasetName])
+
+  const buildAreaData = useCallback((format: 'csv' | 'xlsx') => {
+    if (!selectedAreaIds || selectedAreaIds.size === 0) return null
+    const areaPoints = points.filter(p => selectedAreaIds.has(p.id))
+    if (areaPoints.length === 0) return null
+
+    const allCols = columns.length > 0 ? columns : Object.keys(areaPoints[0]?.metadata || {})
+    const colNames = [...allCols, 'Latitude', 'Longitude']
+    const flatRows: any[] = []
+    for (const p of areaPoints) {
+      const meta = p.metadata || {}
+      const row: any = {}
+      for (const col of allCols) row[col] = meta[col] ?? ''
+      row['Latitude'] = p.latitude
+      row['Longitude'] = p.longitude
+      flatRows.push(row)
+    }
+    return { colNames, flatRows, count: areaPoints.length }
+  }, [selectedAreaIds, points, columns])
+
+  const handleExportCsvArea = useCallback(() => {
+    const data = buildAreaData('csv')
+    if (!data) { toast.error('Tidak ada data di area terpilih'); return }
+    const rows: string[][] = [data.colNames]
+    for (const r of data.flatRows) {
+      const row = data.colNames.map(col => {
+        const val = String(r[col] ?? '')
+        if (val.includes(',') || val.includes('"') || val.includes('\n')) return `"${val.replace(/"/g, '""')}"`
+        return val
+      })
+      rows.push(row)
+    }
+    const csv = rows.map(r => r.join(',')).join('\n')
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8' })
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = `${datasetName.replace(/[^a-zA-Z0-9]/g, '_') || 'area'}.csv`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(blobUrl)
+    toast.success(`${data.count} titik di area di-export ke CSV!`)
+  }, [buildAreaData, datasetName])
+
+  const handleExportExcelArea = useCallback(() => {
+    const data = buildAreaData('xlsx')
+    if (!data) { toast.error('Tidak ada data di area terpilih'); return }
+    // Dynamic import xlsx for client-side generation
+    import('xlsx').then(XLSX => {
+      const ws = XLSX.utils.json_to_sheet(data.flatRows, { header: data.colNames })
+      const colWidths = data.colNames.map(name => {
+        let maxLen = name.length
+        for (const row of data.flatRows) {
+          const val = String(row[name] ?? '')
+          if (val.length > maxLen) maxLen = val.length
+        }
+        return { wch: Math.min(maxLen + 2, 50) }
+      })
+      ws['!cols'] = colWidths
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, 'Area Data')
+      const buf = XLSX.write(wb, { type: 'array', bookType: 'xlsx' })
+      const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `${datasetName.replace(/[^a-zA-Z0-9]/g, '_') || 'area'}.xlsx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toast.success(`${data.count} titik di area di-export ke Excel!`)
+    }).catch(() => toast.error('Gagal export Excel'))
+  }, [buildAreaData, datasetName])
+
+  // Area selection callbacks
+  const handleAreaSelected = useCallback((ids: Set<string>) => {
+    setSelectedAreaIds(ids)
+    if (ids.size > 0) {
+      toast.success(`${ids.size.toLocaleString()} titik dipilih dalam area`)
+    }
+  }, [])
+
+  const handleClearArea = useCallback(() => {
+    setSelectedAreaIds(null)
+    setDrawMode(false)
+  }, [])
 
   return (
     <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
@@ -159,9 +288,20 @@ export default function Home() {
         </div>
         <div className="flex items-center gap-1">
           {stats && stats.total > 0 && (
-            <button className="h-8 px-2 flex items-center gap-1.5 rounded-lg hover:bg-blue-50 text-blue-600" onClick={() => setGoogleEarthOpen(true)}>
-              <Globe className="w-4 h-4" /><span className="text-xs font-medium">KML</span>
-            </button>
+            <>
+              <button className="h-8 px-2 flex items-center gap-1.5 rounded-lg hover:bg-emerald-50 text-emerald-600" onClick={handleExportCsv}>
+                <FileDown className="w-4 h-4" /><span className="text-xs font-medium">CSV</span>
+              </button>
+              <button className="h-8 px-2 flex items-center gap-1.5 rounded-lg hover:bg-green-50 text-green-600" onClick={handleExportExcel}>
+                <Table2 className="w-4 h-4" /><span className="text-xs font-medium">Excel</span>
+              </button>
+              <button className="h-8 px-2 flex items-center gap-1.5 rounded-lg hover:bg-violet-50 text-violet-600" onClick={() => setDrawMode(!drawMode)}>
+                <Pentagon className="w-4 h-4" /><span className="text-xs font-medium">Area</span>
+              </button>
+              <button className="h-8 px-2 flex items-center gap-1.5 rounded-lg hover:bg-blue-50 text-blue-600" onClick={() => setGoogleEarthOpen(true)}>
+                <Globe className="w-4 h-4" /><span className="text-xs font-medium">KML</span>
+              </button>
+            </>
           )}
           <button className="h-8 w-8 flex items-center justify-center rounded hover:bg-slate-100" onClick={() => setMobileSidebar(!mobileSidebar)}><Menu className="w-4 h-4" /></button>
         </div>
@@ -172,14 +312,14 @@ export default function Home() {
           <div className="lg:hidden fixed inset-0 z-40">
             <div className="absolute inset-0 bg-black/30" onClick={() => setMobileSidebar(false)} />
             <div className="relative z-50 w-80 h-full">
-              <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} searchQuery={searchQuery} hasCoord={hasCoord} customFilters={customFilters} markerConfig={markerConfig} onMarkerConfigChange={setMarkerConfig} onFiltersChange={(f) => { handleFiltersChange(f); setMobileSidebar(false) }} onUploadClick={() => { setUploadDialogOpen(true); setMobileSidebar(false) }} onDatasetSwitch={refreshAll} onClose={() => setMobileSidebar(false)} />
+              <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} searchQuery={searchQuery} hasCoord={hasCoord} customFilters={customFilters} markerConfig={markerConfig} onMarkerConfigChange={setMarkerConfig} onFiltersChange={(f) => { handleFiltersChange(f); setMobileSidebar(false) }} onUploadClick={() => { setUploadDialogOpen(true); setMobileSidebar(false) }} onDatasetSwitch={refreshAll} onExportCsv={handleExportCsv} onExportExcel={handleExportExcel} onClose={() => setMobileSidebar(false)} />
             </div>
           </div>
         )}
 
         {sidebarOpen && (
           <div className="hidden lg:block shrink-0">
-            <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} searchQuery={searchQuery} hasCoord={hasCoord} customFilters={customFilters} markerConfig={markerConfig} onMarkerConfigChange={setMarkerConfig} onFiltersChange={handleFiltersChange} onUploadClick={() => setUploadDialogOpen(true)} onDatasetSwitch={refreshAll} />
+            <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} searchQuery={searchQuery} hasCoord={hasCoord} customFilters={customFilters} markerConfig={markerConfig} onMarkerConfigChange={setMarkerConfig} onFiltersChange={handleFiltersChange} onUploadClick={() => setUploadDialogOpen(true)} onDatasetSwitch={refreshAll} onExportCsv={handleExportCsv} onExportExcel={handleExportExcel} />
           </div>
         )}
 
@@ -191,13 +331,57 @@ export default function Home() {
             <button className="hidden lg:flex absolute top-4 left-[21rem] z-[1000] h-9 w-9 bg-white rounded-lg shadow-lg items-center justify-center hover:bg-slate-50" onClick={() => setSidebarOpen(false)}><PanelRightClose className="w-4 h-4" /></button>
           )}
 
+          {/* Top-right action buttons */}
           {stats && stats.total > 0 && (
-            <button className="absolute top-4 right-4 z-[1000] h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-blue-50 text-blue-600 font-medium text-xs transition-colors" onClick={() => setGoogleEarthOpen(true)}>
-              <Globe className="w-4 h-4" /><span className="hidden sm:inline">Export Google Earth</span>
-            </button>
+            <div className="absolute top-4 right-4 z-[1000] flex items-center gap-2">
+              <button className="h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-emerald-50 text-emerald-600 font-medium text-xs transition-colors" onClick={handleExportCsv}>
+                <FileDown className="w-4 h-4" /><span className="hidden sm:inline">CSV</span>
+              </button>
+              <button className="h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-green-50 text-green-700 font-medium text-xs transition-colors" onClick={handleExportExcel}>
+                <Table2 className="w-4 h-4" /><span className="hidden sm:inline">Excel</span>
+              </button>
+              <button
+                className={`h-9 px-3 rounded-lg shadow-lg flex items-center gap-2 font-medium text-xs transition-colors ${drawMode ? 'bg-violet-500 text-white hover:bg-violet-600' : 'bg-white text-violet-600 hover:bg-violet-50'}`}
+                onClick={() => { setDrawMode(!drawMode); if (selectedAreaIds) setSelectedAreaIds(null) }}
+              >
+                <Pentagon className="w-4 h-4" /><span className="hidden sm:inline">{drawMode ? 'Gambar Area...' : 'Pilih Area'}</span>
+              </button>
+              <button className="h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-blue-50 text-blue-600 font-medium text-xs transition-colors" onClick={() => setGoogleEarthOpen(true)}>
+                <Globe className="w-4 h-4" /><span className="hidden sm:inline">Google Earth</span>
+              </button>
+            </div>
           )}
 
-          <ODPMap points={points} loading={loading} selectedPoint={selectedPoint} onSelectPoint={setSelectedPoint} columns={columns} markerConfig={markerConfig} />
+          {/* Area selection info bar */}
+          {selectedAreaIds && selectedAreaIds.size > 0 && (
+            <div className="absolute top-16 right-4 z-[1000] flex items-center gap-2">
+              <div className="h-9 px-3 bg-violet-500 text-white rounded-lg shadow-lg flex items-center gap-2 text-xs font-semibold">
+                <Pentagon className="w-4 h-4" />
+                {selectedAreaIds.size.toLocaleString()} titik dipilih
+              </div>
+              <button className="h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-emerald-50 text-emerald-600 font-medium text-xs transition-colors" onClick={handleExportCsvArea}>
+                <FileDown className="w-4 h-4" /><span className="hidden sm:inline">CSV</span>
+              </button>
+              <button className="h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-green-50 text-green-700 font-medium text-xs transition-colors" onClick={handleExportExcelArea}>
+                <Table2 className="w-4 h-4" /><span className="hidden sm:inline">Excel</span>
+              </button>
+              <button className="h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-1 hover:bg-red-50 text-red-500 text-xs font-medium transition-colors" onClick={handleClearArea}>
+                <X className="w-3.5 h-3.5" /> Hapus
+              </button>
+            </div>
+          )}
+
+          <ODPMap
+            points={points}
+            loading={loading}
+            selectedPoint={selectedPoint}
+            onSelectPoint={setSelectedPoint}
+            columns={columns}
+            markerConfig={markerConfig}
+            drawMode={drawMode}
+            onAreaSelected={handleAreaSelected}
+            selectedAreaIds={selectedAreaIds}
+          />
 
           {selectedPoint && (
             <div className="hidden md:block absolute right-0 top-0 h-full z-[999]">
@@ -226,7 +410,7 @@ export default function Home() {
 
       <UploadExcelDialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen} onUploadComplete={refreshAll} />
 
-            <GoogleEarthDialog
+      <GoogleEarthDialog
         open={googleEarthOpen} onOpenChange={setGoogleEarthOpen}
         filters={{ search: searchQuery, hasCoord, customFilters }}
         markerConfig={markerConfig}

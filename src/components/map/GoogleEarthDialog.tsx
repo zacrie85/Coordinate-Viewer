@@ -311,6 +311,10 @@ export default function GoogleEarthDialog({
               <option value="15">Setiap 15 menit</option>
               <option value="30">Setiap 30 menit</option>
               <option value="60">Setiap 1 jam</option>
+              <option value="240">Setiap 4 jam</option>
+              <option value="480">Setiap 8 jam</option>
+              <option value="960">Setiap 16 jam</option>
+              <option value="1440">Setiap 24 jam</option>
             </select>
           </div>
 
