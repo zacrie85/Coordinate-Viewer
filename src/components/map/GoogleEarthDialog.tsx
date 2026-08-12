@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Globe, Download, X, Filter, MapPin, Check, Layers, Folder, Plus, Tag } from 'lucide-react'
+import { Globe, Download, X, Filter, MapPin, Check, Layers, Folder, Plus, Tag, Pentagon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from 'sonner'
@@ -15,6 +15,7 @@ interface ActiveFilters {
 
 export default function GoogleEarthDialog({
   open, onOpenChange, filters, markerConfig, filteredCount, totalCount, datasetName, columns,
+  selectedAreaIds,
 }: {
   open: boolean
   onOpenChange: (v: boolean) => void
@@ -24,12 +25,20 @@ export default function GoogleEarthDialog({
   totalCount: number
   datasetName: string
   columns: string[]
+  selectedAreaIds?: Set<string> | null
 }) {
   const [refreshMin, setRefreshMin] = useState('5')
   const [hostInput, setHostInput] = useState('')
   const [downloading, setDownloading] = useState<string | null>(null)
-  const [exportMode, setExportMode] = useState<'filtered' | 'all'>('filtered')
+  const [exportMode, setExportMode] = useState<'area' | 'filtered' | 'all'>('filtered')
   const [selectedLabelCols, setSelectedLabelCols] = useState<string[]>([])
+
+  // Auto-select area mode if there's an active area selection
+  useEffect(() => {
+    if (open && selectedAreaIds && selectedAreaIds.size > 0) {
+      setExportMode('area')
+    }
+  }, [open, selectedAreaIds])
 
   useEffect(() => {
     if (open && columns.length > 0) {
@@ -74,8 +83,9 @@ export default function GoogleEarthDialog({
   }, [filters])
 
   const hasActiveFilters = activeFilterLabels.length > 0
+  const hasAreaSelection = selectedAreaIds && selectedAreaIds.size > 0
 
-      const getFilterParams = () => {
+  const getFilterParams = () => {
     const params = new URLSearchParams()
     if (selectedLabelCols.length > 0) params.set('labelCols', selectedLabelCols.join(','))
     if (markerConfig.nameCol1) params.set('nameCol1', markerConfig.nameCol1)
@@ -83,6 +93,13 @@ export default function GoogleEarthDialog({
     if (markerConfig.capacityCol) params.set('capacityCol', markerConfig.capacityCol)
     if (markerConfig.activeCol) params.set('activeCol', markerConfig.activeCol)
     if (markerConfig.availCol) params.set('availCol', markerConfig.availCol)
+
+    // ── AREA SELECTION: kirim IDs ke API ──
+    if (exportMode === 'area' && hasAreaSelection) {
+      params.set('ids', Array.from(selectedAreaIds).join(','))
+      return params
+    }
+
     if (exportMode === 'all') return params
     if (filters.search) params.set('search', filters.search)
     if (filters.hasCoord) params.set('hasCoord', filters.hasCoord)
@@ -138,7 +155,10 @@ export default function GoogleEarthDialog({
   }
 
   const downloadNetworkLink = () => downloadBlob(buildNetworkLinkUrl(), 'data-realtime.kml', 'networklink')
-  const downloadDirectKml = () => downloadBlob(buildDirectKmlUrl(), 'data-export.kml', 'direct')
+  const downloadDirectKml = () => {
+    const suffix = exportMode === 'area' ? '-area' : ''
+    downloadBlob(buildDirectKmlUrl(), `data-export${suffix}.kml`, 'direct')
+  }
 
   const copyKmlUrl = () => {
     const base = typeof window !== 'undefined' ? window.location.origin : ''
@@ -154,7 +174,11 @@ export default function GoogleEarthDialog({
     ? buildDirectKmlUrl().replace('/api/kml', `${window.location.origin}/api/kml`)
     : '/api/kml'
 
-  const displayCount = exportMode === 'filtered' ? filteredCount : totalCount
+  const displayCount = exportMode === 'area' && hasAreaSelection
+    ? selectedAreaIds.size
+    : exportMode === 'filtered'
+      ? filteredCount
+      : totalCount
 
   if (!open) return null
 
@@ -170,7 +194,7 @@ export default function GoogleEarthDialog({
             </div>
             <div>
               <h2 className="text-sm font-bold text-slate-800">Export ke Google Earth</h2>
-              <p className="text-[11px] text-slate-400">KML/KMZ dengan filter atau semua data</p>
+              <p className="text-[11px] text-slate-400">KML/KMZ dengan filter, area, atau semua data</p>
             </div>
           </div>
           <button onClick={() => onOpenChange(false)} className="w-7 h-7 rounded-full hover:bg-slate-100 flex items-center justify-center transition-colors">
@@ -223,20 +247,42 @@ export default function GoogleEarthDialog({
             </div>
           )}
 
-          {/* Export Mode */}
+          {/* Export Mode — 3 pilihan: Area / Filtered / All */}
           <div className="bg-slate-50 rounded-lg p-3 border border-slate-200">
             <div className="flex items-center gap-2 mb-2">
               <Layers className="w-3.5 h-3.5 text-slate-500" />
               <span className="text-xs font-semibold text-slate-700">Data yang di-export</span>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
+              {/* Area Selection */}
+              <button
+                onClick={() => setExportMode('area')}
+                className={`relative flex flex-col items-center gap-1 p-2.5 rounded-lg border-2 transition-all text-center ${
+                  exportMode === 'area'
+                    ? 'border-violet-500 bg-violet-50 shadow-sm'
+                    : 'border-slate-200 bg-white hover:border-slate-300'
+                } ${!hasAreaSelection ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
+                disabled={!hasAreaSelection}
+              >
+                {exportMode === 'area' && hasAreaSelection && (
+                  <div className="absolute top-1.5 right-1.5 w-4 h-4 rounded-full bg-violet-500 flex items-center justify-center">
+                    <Check className="w-2.5 h-2.5 text-white" />
+                  </div>
+                )}
+                <Pentagon className={`w-4 h-4 ${exportMode === 'area' ? 'text-violet-600' : 'text-slate-400'}`} />
+                <span className={`text-[11px] font-semibold ${exportMode === 'area' ? 'text-violet-700' : 'text-slate-600'}`}>Area</span>
+                <span className="text-lg font-bold text-violet-600">{hasAreaSelection ? selectedAreaIds.size.toLocaleString('id-ID') : '0'}</span>
+                <span className="text-[10px] text-slate-400">Polygon</span>
+              </button>
+
+              {/* Filtered Only */}
               <button
                 onClick={() => setExportMode('filtered')}
                 className={`relative flex flex-col items-center gap-1 p-2.5 rounded-lg border-2 transition-all text-center ${
                   exportMode === 'filtered'
                     ? 'border-blue-500 bg-blue-50 shadow-sm'
                     : 'border-slate-200 bg-white hover:border-slate-300'
-                } ${!hasActiveFilters ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                } ${!hasActiveFilters ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer'}`}
                 disabled={!hasActiveFilters}
               >
                 {exportMode === 'filtered' && hasActiveFilters && (
@@ -245,10 +291,12 @@ export default function GoogleEarthDialog({
                   </div>
                 )}
                 <Filter className={`w-4 h-4 ${exportMode === 'filtered' ? 'text-blue-600' : 'text-slate-400'}`} />
-                <span className={`text-[11px] font-semibold ${exportMode === 'filtered' ? 'text-blue-700' : 'text-slate-600'}`}>Filtered Only</span>
+                <span className={`text-[11px] font-semibold ${exportMode === 'filtered' ? 'text-blue-700' : 'text-slate-600'}`}>Filtered</span>
                 <span className="text-lg font-bold text-blue-600">{filteredCount.toLocaleString('id-ID')}</span>
-                <span className="text-[10px] text-slate-400">Data terfilter</span>
+                <span className="text-[10px] text-slate-400">Terfilter</span>
               </button>
+
+              {/* All Data */}
               <button
                 onClick={() => setExportMode('all')}
                 className={`relative flex flex-col items-center gap-1 p-2.5 rounded-lg border-2 transition-all text-center ${
@@ -263,18 +311,39 @@ export default function GoogleEarthDialog({
                   </div>
                 )}
                 <MapPin className={`w-4 h-4 ${exportMode === 'all' ? 'text-emerald-600' : 'text-slate-400'}`} />
-                <span className={`text-[11px] font-semibold ${exportMode === 'all' ? 'text-emerald-700' : 'text-slate-600'}`}>Semua Data</span>
+                <span className={`text-[11px] font-semibold ${exportMode === 'all' ? 'text-emerald-700' : 'text-slate-600'}`}>Semua</span>
                 <span className="text-lg font-bold text-emerald-600">{totalCount.toLocaleString('id-ID')}</span>
                 <span className="text-[10px] text-slate-400">Seluruh titik</span>
               </button>
             </div>
-            {!hasActiveFilters && (
+
+            {/* Info messages */}
+            {exportMode === 'area' && !hasAreaSelection && (
+              <p className="text-[10px] text-amber-600 mt-2 flex items-center gap-1">
+                <span className="w-1 h-1 rounded-full bg-amber-500" />
+                Tidak ada area terpilih. Gambar polygon di peta terlebih dahulu.
+              </p>
+            )}
+            {exportMode === 'filtered' && !hasActiveFilters && (
               <p className="text-[10px] text-amber-600 mt-2 flex items-center gap-1">
                 <span className="w-1 h-1 rounded-full bg-amber-500" />
                 Tidak ada filter aktif. Pilih &quot;Semua Data&quot; atau terapkan filter terlebih dahulu.
               </p>
             )}
           </div>
+
+          {/* Area Selection Info */}
+          {exportMode === 'area' && hasAreaSelection && (
+            <div className="bg-violet-50/60 rounded-lg p-3 border border-violet-100">
+              <div className="flex items-center gap-1.5 mb-1">
+                <Pentagon className="w-3 h-3 text-violet-500" />
+                <span className="text-[11px] font-semibold text-violet-700">Area Selection</span>
+              </div>
+              <p className="text-[10px] text-violet-600">
+                <b>{selectedAreaIds.size.toLocaleString('id-ID')}</b> titik di dalam polygon akan di-export ke KML.
+              </p>
+            </div>
+          )}
 
           {/* Active Filters */}
           {hasActiveFilters && exportMode === 'filtered' && (
@@ -340,6 +409,7 @@ export default function GoogleEarthDialog({
             </div>
             <p className="text-[11px] text-blue-600 mb-2.5 leading-relaxed">
               Download file KML, buka di Google Earth. Data otomatis refresh sesuai interval.
+              {exportMode === 'area' && ' Hanya data di dalam polygon.'}
               {exportMode === 'filtered' && hasActiveFilters && ' Hanya data yang sesuai filter.'}
             </p>
             <Button size="sm" className="w-full bg-blue-600 hover:bg-blue-700" onClick={downloadNetworkLink} disabled={downloading === 'networklink'}>
@@ -359,6 +429,7 @@ export default function GoogleEarthDialog({
             </div>
             <p className="text-[11px] text-slate-500 mb-2.5 leading-relaxed">
               Download snapshot data saat ini. Tidak auto-refresh.
+              {exportMode === 'area' && ' Hanya data di dalam polygon.'}
               {exportMode === 'filtered' && hasActiveFilters && ' Hanya data yang sesuai filter.'}
             </p>
             <Button size="sm" variant="outline" className="w-full" onClick={downloadDirectKml} disabled={downloading === 'direct'}>
@@ -397,7 +468,7 @@ export default function GoogleEarthDialog({
             <div className="font-semibold text-slate-700 text-xs">Cara pakai:</div>
             <ol className="list-decimal list-inside space-y-0.5">
               <li>Pilih kolom label (opsional) — tentukan nama yang tampil di Google Earth</li>
-              <li>Pilih mode export: <b>Filtered Only</b> atau <b>Semua Data</b></li>
+              <li>Pilih mode export: <b>Area</b>, <b>Filtered</b>, atau <b>Semua Data</b></li>
               <li>Download file NetworkLink KML (Cara 1) atau KML Langsung (Cara 2)</li>
               <li>Buka file tersebut dengan Google Earth Pro</li>
               <li>Data akan muncul di peta Google Earth</li>

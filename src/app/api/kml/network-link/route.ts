@@ -2,51 +2,49 @@ import { NextRequest, NextResponse } from 'next/server'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
-  const host = searchParams.get('host') || 'localhost:3000'
-  const protocol = searchParams.get('protocol') || 'https'
-  const refresh = searchParams.get('refresh') || '5'
+  const host = searchParams.get('host') || ''
+  const protocol = searchParams.get('protocol') || 'http'
+  const refreshMinutes = parseInt(searchParams.get('refresh') || '5')
 
-  try {
-    // Forward all filter + marker config params to the KML endpoint
-    const kmlParams = new URLSearchParams()
-    const forwardKeys = ['search', 'hasCoord', 'nameCol1', 'nameCol2', 'capacityCol', 'activeCol', 'availCol', 'groupBy', 'labelCols']
-    for (const key of forwardKeys) {
-      const val = searchParams.get(key)
-      if (val) kmlParams.set(key, val)
+  // Forward SEMUA params kecuali host/protocol/refresh (bukan filter-only)
+  const skipParams = new Set(['host', 'protocol', 'refresh'])
+  const paramsParts: string[] = []
+  for (const [key, value] of searchParams.entries()) {
+    if (!skipParams.has(key) && value) {
+      paramsParts.push(`${key}=${encodeURIComponent(value)}`)
     }
-    // Forward cf0-cf2 / cv0-cv2
-    for (let i = 0; i < 3; i++) {
-      const cf = searchParams.get(`cf${i}`)
-      const cv = searchParams.get(`cv${i}`)
-      if (cf) kmlParams.set(`cf${i}`, cf)
-      if (cv) kmlParams.set(`cv${i}`, cv)
-    }
+  }
+  const filterStr = paramsParts.length > 0 ? '?' + paramsParts.join('&') : ''
 
-    const qs = kmlParams.toString()
-    const kmlUrl = `${protocol}://${host}/api/kml${qs ? '?' + qs : ''}`
+  let kmlDataUrl: string
+  if (host) {
+    kmlDataUrl = `${protocol}://${host}/api/kml${filterStr}`
+  } else {
+    const reqHost = req.headers.get('host') || 'localhost:3000'
+    const reqProto = req.headers.get('x-forwarded-proto') || 'http'
+    kmlDataUrl = `${reqProto}://${reqHost}/api/kml${filterStr}`
+  }
 
-    const kml = `<?xml version="1.0" encoding="UTF-8"?>
+  const kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <NetworkLink>
-    <name>Realtime Data</name>
-    <description>Auto-refresh setiap ${refresh} menit</description>
+    <name>ODP Map Viewer - Real-time</name>
+    <description>Data realtime. Auto-refresh setiap ${refreshMinutes} menit.</description>
+    <refreshVisibility>0</refreshVisibility>
+    <flyToView>0</flyToView>
     <Link>
-      <href>${kmlUrl.replace(/&/g, '&amp;')}</href>
+      <href>${kmlDataUrl}</href>
       <refreshMode>onInterval</refreshMode>
-      <refreshInterval>${refresh}</refreshInterval>
+      <refreshInterval>${refreshMinutes * 60}</refreshInterval>
+      <viewRefreshMode>never</viewRefreshMode>
     </Link>
   </NetworkLink>
 </kml>`
 
-    // UTF-8 BOM for Google Earth compatibility
-    return new NextResponse('\uFEFF' + kml, {
-      headers: {
-        'Content-Type': 'application/vnd.google-earth.kml+xml; charset=utf-8',
-        'Cache-Control': 'no-cache',
-      },
-    })
-  } catch (error) {
-    console.error('NetworkLink error:', error)
-    return NextResponse.json({ error: 'Gagal generate NetworkLink' }, { status: 500 })
-  }
+  return new NextResponse(kml, {
+    headers: {
+      'Content-Type': 'application/vnd.google-earth.kml+xml',
+      'Content-Disposition': 'attachment; filename="odp-realtime.kml"',
+    },
+  })
 }

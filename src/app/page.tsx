@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Menu, MapPin, X, PanelRightClose, Upload, Globe, FileDown, Pentagon, Table2 } from 'lucide-react'
+import { Menu, MapPin, X, PanelRightClose, Upload, Globe, FileDown, Pentagon, Table2, Download } from 'lucide-react'
 import dynamic from 'next/dynamic'
 import { toast } from 'sonner'
 
@@ -365,6 +365,9 @@ export default function Home() {
               <button className="h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-green-50 text-green-700 font-medium text-xs transition-colors" onClick={handleExportExcelArea}>
                 <Table2 className="w-4 h-4" /><span className="hidden sm:inline">Excel</span>
               </button>
+              <button className="h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-blue-50 text-blue-600 font-medium text-xs transition-colors" onClick={() => setGoogleEarthOpen(true)}>
+                <Download className="w-4 h-4" /><span className="hidden sm:inline">KML</span>
+              </button>
               <button className="h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-1 hover:bg-red-50 text-red-500 text-xs font-medium transition-colors" onClick={handleClearArea}>
                 <X className="w-3.5 h-3.5" /> Hapus
               </button>
@@ -416,6 +419,7 @@ export default function Home() {
         markerConfig={markerConfig}
         filteredCount={filteredWithCoord} totalCount={stats?.withCoord || 0} datasetName={datasetName}
         columns={columns}
+        selectedAreaIds={selectedAreaIds}
       />
     </div>
   )

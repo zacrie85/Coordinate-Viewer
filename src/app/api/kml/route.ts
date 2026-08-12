@@ -1,15 +1,84 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import * as XLSX from 'xlsx'
+import { Prisma } from '@prisma/client'
+
+function escapeXml(s: string): string {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
+}
+
+// ── Hitung persentase: Active / Capacity × 100 ──
+function calcPct(meta: Record<string, any>, activeCol: string, capacityCol: string): { pct: number; activeRaw: string; capRaw: string } {
+  if (activeCol && capacityCol) {
+    const aRaw = String(meta[activeCol] ?? '').trim()
+    const cRaw = String(meta[capacityCol] ?? '').trim()
+    const aNum = parseFloat(aRaw.replace(/,/g, ''))
+    const cNum = parseFloat(cRaw.replace(/,/g, ''))
+    if (!isNaN(aNum) && !isNaN(cNum) && cNum > 0) {
+      return { pct: (aNum / cNum) * 100, activeRaw: aRaw, capRaw: cRaw }
+    }
+  }
+  if (capacityCol) {
+    const raw = String(meta[capacityCol] ?? '').trim()
+    const m = raw.match(/^(\d+)\s*[\/\-]\s*(\d+)$/)
+    if (m) { const a = parseInt(m[1]), c = parseInt(m[2]); if (c > 0) return { pct: (a / c) * 100, activeRaw: m[1], capRaw: m[2] } }
+    const p = raw.match(/^(\d+(?:\.\d+)?)\s*%?$/)
+    if (p) return { pct: parseFloat(p[1]), activeRaw: raw, capRaw: '' }
+  }
+  return { pct: -1, activeRaw: '', capRaw: '' }
+}
+
+function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capacityCol: string; activeCol: string; availCol: string; labelCols?: string[] }, i: number, meta: Record<string, any>): string {
+  const descParts: string[] = []
+  const { pct, activeRaw, capRaw } = calcPct(meta, mc.activeCol, mc.capacityCol)
+  if (pct >= 0) {
+    descParts.push(`<b>${escapeXml(mc.activeCol || 'Active')}:</b> ${escapeXml(activeRaw)}`)
+    descParts.push(`<b>${escapeXml(mc.capacityCol || 'Capacity')}:</b> ${escapeXml(capRaw)}`)
+    descParts.push(`<b>Persentase:</b> ${Math.round(pct)}%`)
+  }
+  if (mc.availCol && meta[mc.availCol] && mc.availCol !== mc.activeCol) descParts.push(`<b>${escapeXml(mc.availCol)}:</b> ${escapeXml(String(meta[mc.availCol]))}`)
+  const skipCols = new Set([mc.nameCol1, mc.nameCol2, mc.capacityCol, mc.activeCol, mc.availCol].filter(Boolean))
+  for (const [k, v] of Object.entries(meta)) {
+    if (skipCols.has(k) || !v || v === '') continue
+    descParts.push(`<b>${escapeXml(k)}:</b> ${escapeXml(String(v))}`)
+  }
+
+  // Label: prioritaskan labelCols > nameCol1/nameCol2 > fallback
+  let name = ''
+  if (mc.labelCols && mc.labelCols.length > 0) {
+    name = mc.labelCols.map(c => String(meta[c] || '')).filter(Boolean).join(' - ')
+  }
+  if (!name) {
+    name = mc.nameCol1 && meta[mc.nameCol1]
+      ? [meta[mc.nameCol1], mc.nameCol2 ? meta[mc.nameCol2] : ''].filter(Boolean).join(' - ')
+      : meta['name'] || meta['Name'] || meta['NAMA'] || meta['nama'] || meta['KODE'] || meta['kode'] || `Point ${i + 1}`
+  }
+
+  const styleUrl = pct >= 0 ? `#s-${pct <= 25 ? 'g' : pct <= 50 ? 'b' : pct <= 75 ? 'y' : 'r'}` : '#s-default'
+  return `      <Placemark>
+        <name>${escapeXml(String(name))}</name>
+        <description><![CDATA[${descParts.join('<br/>')}]]></description>
+        <styleUrl>${styleUrl}</styleUrl>
+        <Point><coordinates>${p.longitude},${p.latitude},0</coordinates></Point>
+      </Placemark>`
+}
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const search = searchParams.get('search') || ''
   const hasCoord = searchParams.get('hasCoord') || ''
-  const format = searchParams.get('format') || 'csv'
-  const limit = parseInt(searchParams.get('limit') || '50000')
+  const nameCol1 = searchParams.get('nameCol1') || ''
+  const nameCol2 = searchParams.get('nameCol2') || ''
+  const capacityCol = searchParams.get('capacityCol') || ''
+  const activeCol = searchParams.get('activeCol') || ''
+  const availCol = searchParams.get('availCol') || ''
+  const groupBy = searchParams.get('groupBy') || ''
+  const labelColsRaw = searchParams.get('labelCols') || ''
+  const labelCols = labelColsRaw ? labelColsRaw.split(',').map(s => s.trim()).filter(Boolean) : []
+  const idsRaw = searchParams.get('ids') || ''
+  const mc = { nameCol1, nameCol2, capacityCol, activeCol, availCol, labelCols }
 
-  // Parse column filters
   const columnFilters: { field: string; values: string[] }[] = []
   for (let i = 0; i < 3; i++) {
     const field = searchParams.get(`cf${i}`) || ''
@@ -20,116 +89,65 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  // Parse area selection IDs
+  const areaIds = idsRaw ? new Set(idsRaw.split(',').map(s => s.trim()).filter(Boolean)) : null
+
   try {
     const active = await db.dataset.findFirst({ where: { isActive: true } })
-    if (!active) return NextResponse.json({ error: 'Tidak ada dataset aktif' }, { status: 404 })
+    if (!active) {
+      return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Belum Ada Data</name><description>Upload file Excel terlebih dahulu.</description></Document></kml>`,
+        { headers: { 'Content-Type': 'application/vnd.google-earth.kml+xml', 'Cache-Control': 'no-cache' } })
+    }
 
-    // Build raw SQL
-    const conditions: string[] = []
-    const sqlParams: any[] = []
-    let idx = 1
-    const nextParam = (val: any) => { sqlParams.push(val); return `$${idx++}` }
+    const where: Prisma.DataPointWhereInput = { datasetId: active.id, latitude: { not: 0 }, longitude: { not: 0 } }
+    const ands: Prisma.DataPointWhereInput[] = []
 
-    conditions.push(`"datasetId" = ${nextParam(active.id)}`)
-    if (hasCoord === 'true') { conditions.push(`"latitude" != 0`); conditions.push(`"longitude" != 0`) }
-    else if (hasCoord === 'false') { conditions.push(`("latitude" = 0 OR "longitude" = 0)`) }
-    if (search) conditions.push(`metadata::text ILIKE ${nextParam(`%${search}%`)}`)
-    for (const cf of columnFilters) {
-      const escapedField = cf.field.replace(/'/g, "''")
-      if (cf.values.length === 1) {
-        conditions.push(`metadata->>'${escapedField}' ILIKE ${nextParam(`%${cf.values[0]}%`)}`)
-      } else {
-        const orParts = cf.values.map(v => `metadata->>'${escapedField}' ILIKE ${nextParam(`%${v}%`)}`)
-        conditions.push(`(${orParts.join(' OR ')})`)
+    // ── AREA SELECTION: filter by IDs ──
+    if (areaIds && areaIds.size > 0) {
+      ands.push({ id: { in: Array.from(areaIds) } })
+    }
+
+    if (hasCoord === 'true') { ands.push({ latitude: { not: 0 } }); ands.push({ longitude: { not: 0 } }) }
+    else if (hasCoord === 'false') { ands.push({ OR: [{ latitude: 0 }, { longitude: 0 }] }) }
+    if (search) ands.push({ metadata: { path: [], string_contains: search } })
+    for (const cf of columnFilters) ands.push({ OR: cf.values.map(v => ({ metadata: { path: [cf.field], string_contains: v } })) })
+    if (ands.length > 0) where.AND = ands
+
+    const points = await db.dataPoint.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 })
+
+    const styles = `
+    <Style id="s-default"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
+    <Style id="s-g"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/pushpin-green.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
+    <Style id="s-b"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
+    <Style id="s-y"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
+    <Style id="s-r"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>`
+
+    let foldersXml = ''
+    if (groupBy && points.length > 0) {
+      const groups = new Map<string, any[]>()
+      for (const p of points) {
+        const m = (p.metadata as Record<string, any>) || {}
+        const key = String(m[groupBy] || '(kosong)')
+        if (!groups.has(key)) groups.set(key, [])
+        groups.get(key)!.push(p)
       }
-    }
-    const whereClause = conditions.join(' AND ')
-
-    const rows = await db.$queryRawUnsafe<any[]>(
-      `SELECT * FROM "DataPoint" WHERE ${whereClause} ORDER BY "createdAt" DESC LIMIT ${nextParam(limit)}`,
-      ...sqlParams
-    )
-
-    // Get columns from dataset headers
-    const headers: string[] = active.headers || []
-    const coordCols = new Set<string>()
-    if (active.latCol) coordCols.add(active.latCol)
-    if (active.lngCol) coordCols.add(active.lngCol)
-    if (active.coordCol) coordCols.add(active.coordCol)
-
-    // Build export columns: metadata columns + Latitude + Longitude
-    const exportCols = headers.filter((h: string) => !coordCols.has(h))
-    const colNames = [...exportCols, 'Latitude', 'Longitude']
-
-    // Build flat rows
-    const flatRows: any[] = []
-    for (const r of rows) {
-      const meta = typeof r.metadata === 'string' ? JSON.parse(r.metadata) : (r.metadata || {})
-      const row: any = {}
-      for (const col of exportCols) {
-        row[col] = meta[col] ?? ''
+      for (const [groupName, groupPoints] of groups) {
+        const marks = groupPoints.map((p, i) => buildPlacemark(p, mc, i, (p.metadata as Record<string, any>) || {})).join('\n')
+        foldersXml += `    <Folder><name>${escapeXml(`${groupBy}: ${groupName}`)}</name><description>${groupPoints.length} titik</description>\n${marks}\n    </Folder>\n`
       }
-      row['Latitude'] = r.latitude
-      row['Longitude'] = r.longitude
-      flatRows.push(row)
+    } else {
+      const folderName = areaIds ? `${active.name} (Area Selection - ${points.length} titik)` : active.name
+      const marks = points.map((p, i) => buildPlacemark(p, mc, i, (p.metadata as Record<string, any>) || {})).join('\n')
+      foldersXml = `    <Folder><name>${escapeXml(folderName)}\n${marks}\n    </Folder>\n`
     }
 
-    const safeName = active.name.replace(/[^a-zA-Z0-9\-_]/g, '_') || 'data'
+    const kml = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>${escapeXml(active.name)}</name>\n    <description>${escapeXml(active.name)} - ${points.length} titik</description>\n${styles}\n${foldersXml}  </Document>\n</kml>`
 
-    if (format === 'xlsx') {
-      // Generate proper .xlsx using SheetJS
-      const ws = XLSX.utils.json_to_sheet(flatRows, { header: colNames })
-
-      // Auto-size column widths (estimate based on content)
-      const colWidths = colNames.map(name => {
-        let maxLen = name.length
-        for (const row of flatRows) {
-          const val = String(row[name] ?? '')
-          if (val.length > maxLen) maxLen = val.length
-        }
-        return { wch: Math.min(maxLen + 2, 50) }
-      })
-      ws['!cols'] = colWidths
-
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, ws, 'Data')
-
-      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
-
-      return new NextResponse(buffer, {
-        headers: {
-          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="${safeName}.xlsx"`,
-          'Cache-Control': 'no-cache',
-        },
-      })
-    }
-
-    // Default: CSV with UTF-8 BOM for Excel compatibility
-    const csvRows: string[][] = []
-    csvRows.push(colNames)
-    for (const r of flatRows) {
-      const row = colNames.map((col: string) => {
-        const val = String(r[col] ?? '')
-        if (val.includes(',') || val.includes('"') || val.includes('\n')) {
-          return `"${val.replace(/"/g, '""')}"`
-        }
-        return val
-      })
-      csvRows.push(row)
-    }
-    const csvContent = csvRows.map(r => r.join(',')).join('\n')
-    const bom = '\uFEFF'
-
-    return new NextResponse(bom + csvContent, {
-      headers: {
-        'Content-Type': 'text/csv; charset=utf-8',
-        'Content-Disposition': `attachment; filename="${safeName}.csv"`,
-        'Cache-Control': 'no-cache',
-      },
+    return new NextResponse(kml, {
+      headers: { 'Content-Type': 'application/vnd.google-earth.kml+xml', 'Cache-Control': 'no-cache, no-store, must-revalidate' },
     })
   } catch (error) {
-    console.error('Export error:', error)
-    return NextResponse.json({ error: 'Gagal export data' }, { status: 500 })
+    console.error('KML error:', error)
+    return NextResponse.json({ error: 'Gagal generate KML' }, { status: 500 })
   }
 }
