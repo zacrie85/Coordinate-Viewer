@@ -1,17 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server'
 
+function escapeXml(s: string): string {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&apos;')
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const host = searchParams.get('host') || ''
   const protocol = searchParams.get('protocol') || 'http'
   const refreshMinutes = parseInt(searchParams.get('refresh') || '5')
 
-  // Forward SEMUA params kecuali host/protocol/refresh (bukan filter-only)
+  // Forward SEMUA params kecuali host/protocol/refresh
   const skipParams = new Set(['host', 'protocol', 'refresh'])
   const paramsParts: string[] = []
   for (const [key, value] of searchParams.entries()) {
     if (!skipParams.has(key) && value) {
-      paramsParts.push(`${key}=${encodeURIComponent(value)}`)
+      paramsParts.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`)
     }
   }
   const filterStr = paramsParts.length > 0 ? '?' + paramsParts.join('&') : ''
@@ -25,6 +34,9 @@ export async function GET(req: NextRequest) {
     kmlDataUrl = `${reqProto}://${reqHost}/api/kml${filterStr}`
   }
 
+  // FIX: escape URL untuk XML (<href> tidak boleh ada & mentah)
+  const safeUrl = escapeXml(kmlDataUrl)
+
   const kml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
   <NetworkLink>
@@ -33,7 +45,7 @@ export async function GET(req: NextRequest) {
     <refreshVisibility>0</refreshVisibility>
     <flyToView>0</flyToView>
     <Link>
-      <href>${kmlDataUrl}</href>
+      <href>${safeUrl}</href>
       <refreshMode>onInterval</refreshMode>
       <refreshInterval>${refreshMinutes * 60}</refreshInterval>
       <viewRefreshMode>never</viewRefreshMode>

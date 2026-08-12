@@ -55,6 +55,7 @@ function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capaci
       : meta['name'] || meta['Name'] || meta['NAMA'] || meta['nama'] || meta['KODE'] || meta['kode'] || `Point ${i + 1}`
   }
 
+  // FIX: Gunakan built-in Google Earth icon (bukan URL pushpin yang deprecated)
   const styleUrl = pct >= 0 ? `#s-${pct <= 25 ? 'g' : pct <= 50 ? 'b' : pct <= 75 ? 'y' : 'r'}` : '#s-default'
   return `      <Placemark>
         <name>${escapeXml(String(name))}</name>
@@ -115,12 +116,14 @@ export async function GET(req: NextRequest) {
 
     const points = await db.dataPoint.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 })
 
+    // FIX: Gunakan default pushpin Google Earth + color override (ABGR format)
+    // Tidak pakai external URL yang bisa diblokir/dibatasi aksesnya
     const styles = `
-    <Style id="s-default"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
-    <Style id="s-g"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/pushpin-green.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
-    <Style id="s-b"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/blue-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
-    <Style id="s-y"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/ylw-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>
-    <Style id="s-r"><IconStyle><Icon><href>http://maps.google.com/mapfiles/kml/pushpin/red-pushpin.png</href></Icon><hotSpot x="20" y="2" xunits="pixels" yunits="pixels"/></IconStyle></Style>`
+    <Style id="s-default"><IconStyle><scale>1.0</scale></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
+    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
+    <Style id="s-b"><IconStyle><color>ff0000ff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
+    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>
+    <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0</scale></LabelStyle></Style>`
 
     let foldersXml = ''
     if (groupBy && points.length > 0) {
