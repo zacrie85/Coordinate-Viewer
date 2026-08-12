@@ -10,18 +10,29 @@ datasource db {
 
 /// Konfigurasi dataset — menyimpan info header & koordinat
 model Dataset {
-  id        String   @id @default(cuid())
-  name      String   @default("Unnamed Dataset")
-  headers   String[] /// Semua kolom dari Excel
-  latCol    String?  /// Nama kolom latitude (terpisah)
-  lngCol    String?  /// Nama kolom longitude (terpisah)
-  coordCol  String?  /// Nama kolom koordinat gabungan (format: lat, lng)
-  rowCount  Int      @default(0)
-  isActive  Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  points    DataPoint[]
+  id          String      @id @default(cuid())
+  name        String      @default("Unnamed Dataset")
+  /// Semua kolom dari Excel
+  headers     String[]
+  /// Nama kolom latitude (terpisah)
+  latCol      String?
+  /// Nama kolom longitude (terpisah)
+  lngCol      String?
+  /// Nama kolom koordinat gabungan (format: lat, lng)
+  coordCol    String?
+  rowCount    Int         @default(0)
+  isActive    Boolean     @default(true)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  /// Manual mapping: kolom Active/Terpakai
+  activeCol   String?
+  /// Manual mapping: kolom Capacity/Kapasitas
+  capacityCol String?
+  /// Manual mapping: kolom Name/Label utama
+  labelCol1   String?
+  /// Manual mapping: kolom Code/Kode
+  labelCol2   String?
+  points      DataPoint[]
 
   @@index([isActive])
 }
@@ -32,10 +43,10 @@ model DataPoint {
   datasetId String
   latitude  Float
   longitude Float
-  metadata  Json     /// Semua kolom Excel (kecuali koordinat)
+  /// Semua kolom Excel (kecuali koordinat)
+  metadata  Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
   dataset   Dataset  @relation(fields: [datasetId], references: [id], onDelete: Cascade)
 
   @@index([datasetId])

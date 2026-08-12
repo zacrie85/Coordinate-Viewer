@@ -9,7 +9,7 @@ export async function GET(req: NextRequest) {
   try {
     // Forward all filter + marker config params to the KML endpoint
     const kmlParams = new URLSearchParams()
-    const forwardKeys = ['search', 'hasCoord', 'nameCol1', 'nameCol2', 'capacityCol', 'activeCol', 'availCol', 'groupBy']
+    const forwardKeys = ['search', 'hasCoord', 'nameCol1', 'nameCol2', 'capacityCol', 'activeCol', 'availCol', 'groupBy', 'labelCols']
     for (const key of forwardKeys) {
       const val = searchParams.get(key)
       if (val) kmlParams.set(key, val)
@@ -38,9 +38,10 @@ export async function GET(req: NextRequest) {
   </NetworkLink>
 </kml>`
 
-    return new NextResponse(kml, {
+    // UTF-8 BOM for Google Earth compatibility
+    return new NextResponse('\uFEFF' + kml, {
       headers: {
-        'Content-Type': 'application/vnd.google-earth.kml+xml',
+        'Content-Type': 'application/vnd.google-earth.kml+xml; charset=utf-8',
         'Cache-Control': 'no-cache',
       },
     })

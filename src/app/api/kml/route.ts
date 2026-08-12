@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { Prisma } from '@prisma/client'
 
 function escapeXml(s: string): string {
   return String(s ?? '')
@@ -126,19 +125,58 @@ export async function GET(req: NextRequest) {
   try {
     const active = await db.dataset.findFirst({ where: { isActive: true } })
     if (!active) {
-      return new NextResponse(`<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Belum Ada Data</name><description>Upload file Excel terlebih dahulu.</description></Document></kml>`,
-        { headers: { 'Content-Type': 'application/vnd.google-earth.kml+xml', 'Cache-Control': 'no-cache' } })
+      const emptyKml = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>Belum Ada Data</name><description>Upload file Excel terlebih dahulu.</description></Document></kml>`
+      return new NextResponse('\uFEFF' + emptyKml, {
+        headers: { 'Content-Type': 'application/vnd.google-earth.kml+xml; charset=utf-8', 'Cache-Control': 'no-cache' }
+      })
     }
 
-    const where: Prisma.DataPointWhereInput = { datasetId: active.id, latitude: { not: 0 }, longitude: { not: 0 } }
-    const ands: Prisma.DataPointWhereInput[] = []
-    if (hasCoord === 'true') { ands.push({ latitude: { not: 0 } }); ands.push({ longitude: { not: 0 } }) }
-    else if (hasCoord === 'false') { ands.push({ OR: [{ latitude: 0 }, { longitude: 0 }] }) }
-    if (search) ands.push({ metadata: { path: [], string_contains: search } })
-    for (const cf of columnFilters) ands.push({ OR: cf.values.map(v => ({ metadata: { path: [cf.field], string_contains: v } })) })
-    if (ands.length > 0) where.AND = ands
+    // ── Build raw SQL with ILIKE for JSONB search ──
+    const conditions: string[] = []
+    const sqlParams: any[] = []
+    let idx = 1
+    const nextParam = (val: any) => { sqlParams.push(val); return `$${idx++}` }
 
-    const points = await db.dataPoint.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 })
+    conditions.push(`"datasetId" = ${nextParam(active.id)}`)
+    conditions.push(`"latitude" != 0`)
+    conditions.push(`"longitude" != 0`)
+
+    if (hasCoord === 'true') {
+      // already filtering coord != 0 above
+    } else if (hasCoord === 'false') {
+      conditions.push(`("latitude" = 0 OR "longitude" = 0)`)
+    }
+
+    if (search) {
+      conditions.push(`metadata::text ILIKE ${nextParam(`%${search}%`)}`)
+    }
+
+    for (const cf of columnFilters) {
+      const escapedField = cf.field.replace(/'/g, "''")
+      if (cf.values.length === 1) {
+        conditions.push(`metadata->>'${escapedField}' ILIKE ${nextParam(`%${cf.values[0]}%`)}`)
+      } else {
+        const orParts = cf.values.map(v =>
+          `metadata->>'${escapedField}' ILIKE ${nextParam(`%${v}%`)}`
+        )
+        conditions.push(`(${orParts.join(' OR ')})`)
+      }
+    }
+
+    const whereClause = conditions.join(' AND ')
+
+    const rows = await db.$queryRawUnsafe<any[]>(
+      `SELECT * FROM "DataPoint" WHERE ${whereClause} ORDER BY "createdAt" DESC LIMIT 50000`,
+      ...sqlParams
+    )
+
+    // Parse metadata from raw SQL
+    const points = rows.map((r: any) => ({
+      ...r,
+      latitude: Number(r.latitude),
+      longitude: Number(r.longitude),
+      metadata: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : (r.metadata || {}),
+    }))
 
     const BASE_ICON = 'http://maps.google.com/mapfiles/kml/paddle/wht-circle.png'
     const styles = '<Style id="s-default"><IconStyle><color>ffa0a0a0</color><scale>0.7</scale><Icon><href>' + BASE_ICON + '</href></Icon><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></IconStyle></Style>'
@@ -197,8 +235,9 @@ export async function GET(req: NextRequest) {
 
     const kml = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>${escapeXml(active.name)}</name>\n    <description>${escapeXml(active.name)} - ${points.length} titik</description>\n${styles}\n${foldersXml}  </Document>\n</kml>`
 
-    return new NextResponse(kml, {
-      headers: { 'Content-Type': 'application/vnd.google-earth.kml+xml', 'Cache-Control': 'no-cache, no-store, must-revalidate' },
+    // UTF-8 BOM for Google Earth compatibility
+    return new NextResponse('\uFEFF' + kml, {
+      headers: { 'Content-Type': 'application/vnd.google-earth.kml+xml; charset=utf-8', 'Cache-Control': 'no-cache, no-store, must-revalidate' },
     })
   } catch (error) {
     console.error('KML error:', error)

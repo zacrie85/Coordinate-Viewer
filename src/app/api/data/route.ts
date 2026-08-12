@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { db } from '@/lib/db'
-import { Prisma } from '@prisma/client'
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
@@ -23,41 +22,66 @@ export async function GET(req: NextRequest) {
     const active = await db.dataset.findFirst({ where: { isActive: true } })
     if (!active) return NextResponse.json({ data: [], pagination: { total: 0, limit } })
 
-    const where: Prisma.DataPointWhereInput = { datasetId: active.id }
-    const ands: Prisma.DataPointWhereInput[] = []
+    // ── Build raw SQL with parameterized queries ──
+    const conditions: string[] = []
+    const sqlParams: any[] = []
+    let idx = 1
+
+    const nextParam = (val: any) => { sqlParams.push(val); return `$${idx++}` }
+
+    conditions.push(`"datasetId" = ${nextParam(active.id)}`)
 
     // Coordinate filter
     if (hasCoord === 'true') {
-      ands.push({ latitude: { not: 0 } })
-      ands.push({ longitude: { not: 0 } })
+      conditions.push(`"latitude" != 0`)
+      conditions.push(`"longitude" != 0`)
     } else if (hasCoord === 'false') {
-      ands.push({ OR: [{ latitude: 0 }, { longitude: 0 }] })
+      conditions.push(`("latitude" = 0 OR "longitude" = 0)`)
     }
 
-    // Search in all metadata
+    // Search in all metadata (cast entire JSONB to text)
     if (search) {
-      ands.push({ metadata: { path: [], string_contains: search } })
+      conditions.push(`metadata::text ILIKE ${nextParam(`%${search}%`)}`)
     }
 
     // Multi-column field filters
     for (const cf of columnFilters) {
-      ands.push({
-        OR: cf.values.map(v => ({ metadata: { path: [cf.field], string_contains: v } }))
-      })
+      const escapedField = cf.field.replace(/'/g, "''")
+      if (cf.values.length === 1) {
+        conditions.push(`metadata->>'${escapedField}' ILIKE ${nextParam(`%${cf.values[0]}%`)}`)
+      } else {
+        // Multiple values for same field → OR group
+        const orParts = cf.values.map(v =>
+          `metadata->>'${escapedField}' ILIKE ${nextParam(`%${v}%`)}`
+        )
+        conditions.push(`(${orParts.join(' OR ')})`)
+      }
     }
 
-    if (ands.length > 0) where.AND = ands
+    const whereClause = conditions.join(' AND ')
 
-    const [points, total] = await Promise.all([
-      db.dataPoint.findMany({
-        where,
-        orderBy: { createdAt: 'desc' },
-        take: limit,
-      }),
-      db.dataPoint.count({ where }),
-    ])
+    const rows = await db.$queryRawUnsafe<any[]>(
+      `SELECT * FROM "DataPoint" WHERE ${whereClause} ORDER BY "createdAt" DESC LIMIT ${nextParam(limit)}`,
+      ...sqlParams
+    )
 
-    return NextResponse.json({ data: points, pagination: { total, limit } })
+    // Parse metadata if returned as string from raw SQL
+    const points = rows.map((r: any) => ({
+      id: r.id,
+      datasetId: r.datasetId,
+      latitude: Number(r.latitude),
+      longitude: Number(r.longitude),
+      metadata: typeof r.metadata === 'string' ? JSON.parse(r.metadata) : (r.metadata || {}),
+      createdAt: r.createdAt,
+    }))
+
+    // Get total count
+    const countRows = await db.$queryRawUnsafe<[{ count: bigint }]>(
+      `SELECT COUNT(*)::int AS count FROM "DataPoint" WHERE ${whereClause}`,
+      ...sqlParams.slice(0, -1) // exclude the LIMIT param
+    )
+
+    return NextResponse.json({ data: points, pagination: { total: Number(countRows[0]?.count || 0), limit } })
   } catch (error) {
     console.error('Data error:', error)
     return NextResponse.json({ error: 'Gagal mengambil data' }, { status: 500 })

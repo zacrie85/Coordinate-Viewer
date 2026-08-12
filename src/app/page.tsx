@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
-import { Menu, MapPin, X, PanelRightClose, Upload, Globe } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Menu, MapPin, X, PanelRightClose, Upload, Settings2, Download, Globe, AlertTriangle } from 'lucide-react'
+import type { MarkerConfig } from '@/components/map/ODPMap'
 import dynamic from 'next/dynamic'
 import { toast } from 'sonner'
 
@@ -10,6 +11,7 @@ const UploadExcelDialog = dynamic(() => import('@/components/map/UploadExcelDial
 const FilterSidebar = dynamic(() => import('@/components/map/FilterSidebar'), { ssr: false })
 const ODPDetailPanel = dynamic(() => import('@/components/map/ODPDetailPanel'), { ssr: false })
 const GoogleEarthDialog = dynamic(() => import('@/components/map/GoogleEarthDialog'), { ssr: false })
+const ColumnMappingDialog = dynamic(() => import('@/components/map/ColumnMappingDialog'), { ssr: false })
 
 interface DataPoint {
   id: string; latitude: number; longitude: number; metadata: Record<string, any>; createdAt: string
@@ -17,65 +19,10 @@ interface DataPoint {
 
 interface ColumnInfo {
   columns: string[]; datasetName: string; latCol: string | null; lngCol: string | null; coordCol: string | null; datasetId: string
+  activeCol: string | null; capacityCol: string | null; labelCol1: string | null; labelCol2: string | null
 }
 
 interface StatsData { total: number; withCoord: number; withoutCoord: number; datasetName: string; rowCount: number }
-
-export interface CustomFilterSlot { field: string; values: string[] }
-
-export interface MarkerConfig {
-  nameCol1: string
-  nameCol2: string
-  capacityCol: string
-  activeCol: string
-  availCol: string
-}
-
-const DEFAULT_MC: MarkerConfig = { nameCol1: '', nameCol2: '', capacityCol: '', activeCol: '', availCol: '' }
-
-// ── AUTO-DETECT: scan kolom Excel dan cocokkan berdasarkan pola nama ──
-
-const CAPACITY_PATTERNS = /capac|kapas|avail|ketersedia|usage|pemakaian|used|terpakai|utilized|penggunaan|penuh|fill|occup|terisi/i
-const ACTIVE_PATTERNS = /^active$|^status$|^enable$|^state$|^aktif$|^kondisi$|^condition$/i
-const NAME1_PATTERNS = /^name$|^nama$|^odp$|^label$|^description$|^deskripsi$|^alamat$|^address$|^location$|^lokasi$/i
-const NAME2_PATTERNS = /^kode$|^code$|^id$|^no$|^number$|^nomor$|^sn$|^serial$/i
-
-function autoDetectConfig(cols: string[]): MarkerConfig {
-  const mc: MarkerConfig = { ...DEFAULT_MC }
-  const lower = cols.map(c => c.toLowerCase().trim())
-
-  // Detect capacity column (highest priority)
-  for (let i = 0; i < cols.length; i++) {
-    if (CAPACITY_PATTERNS.test(lower[i])) { mc.capacityCol = cols[i]; break }
-  }
-
-  // Detect active/status column
-  for (let i = 0; i < cols.length; i++) {
-    if (ACTIVE_PATTERNS.test(lower[i])) { mc.activeCol = cols[i]; break }
-  }
-
-  // Detect avail/ketersediaan column (different from capacity)
-  for (let i = 0; i < cols.length; i++) {
-    if (/^avail|^ketersedia|^available/i.test(lower[i]) && cols[i] !== mc.capacityCol) {
-      mc.availCol = cols[i]; break
-    }
-  }
-
-  // If no separate avail col, reuse capacity or active
-  if (!mc.availCol && mc.capacityCol) mc.availCol = mc.capacityCol
-  if (!mc.availCol && mc.activeCol) mc.availCol = mc.activeCol
-
-  // Detect name columns
-  const usedCols = new Set([mc.capacityCol, mc.activeCol, mc.availCol])
-  for (let i = 0; i < cols.length; i++) {
-    if (!usedCols.has(cols[i]) && NAME1_PATTERNS.test(lower[i])) { mc.nameCol1 = cols[i]; break }
-  }
-  for (let i = 0; i < cols.length; i++) {
-    if (!usedCols.has(cols[i]) && cols[i] !== mc.nameCol1 && NAME2_PATTERNS.test(lower[i])) { mc.nameCol2 = cols[i]; break }
-  }
-
-  return mc
-}
 
 export default function Home() {
   const [points, setPoints] = useState<DataPoint[]>([])
@@ -90,29 +37,56 @@ export default function Home() {
   const [mobileSidebar, setMobileSidebar] = useState(false)
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false)
   const [googleEarthOpen, setGoogleEarthOpen] = useState(false)
+  const [columnMappingOpen, setColumnMappingOpen] = useState(false)
+  const [customField, setCustomField] = useState('')
+  const [customValues, setCustomValues] = useState<string[]>([])
   const [searchQuery, setSearchQuery] = useState('')
   const [hasCoord, setHasCoord] = useState('')
-  const [customFilters, setCustomFilters] = useState<CustomFilterSlot[]>([
-    { field: '', values: [] }, { field: '', values: [] }, { field: '', values: [] },
-  ])
-  const [markerConfig, setMarkerConfig] = useState<MarkerConfig>(DEFAULT_MC)
-  const autoDetectedRef = useRef(false)
+  const [markerConfig, setMarkerConfig] = useState<MarkerConfig | null>(null)
+  const [currentMapping, setCurrentMapping] = useState({ activeCol: null as string | null, capacityCol: null as string | null, labelCol1: null as string | null, labelCol2: null as string | null })
 
   const loadColumns = useCallback(() => {
     fetch('/api/data/columns').then(r => r.json()).then((d: ColumnInfo) => {
-      const cols = d.columns || []
-      setColumns(cols)
+      setColumns(d.columns || [])
       setDatasetName(d.datasetName || '')
       setDatasetId(d.datasetId || '')
       setCoordInfo({ latCol: d.latCol, lngCol: d.lngCol, coordCol: d.coordCol })
-
-      // Auto-detect marker config from column names
-      if (cols.length > 0) {
-        const detected = autoDetectConfig(cols)
-        setMarkerConfig(detected)
-        autoDetectedRef.current = true
+      setCurrentMapping({
+        activeCol: d.activeCol,
+        capacityCol: d.capacityCol,
+        labelCol1: d.labelCol1,
+        labelCol2: d.labelCol2,
+      })
+      const hasManual = d.activeCol || d.capacityCol || d.labelCol1 || d.labelCol2
+      if (hasManual) {
+        setMarkerConfig({
+          activeCol: d.activeCol || '',
+          capacityCol: d.capacityCol || '',
+          labelCol1: d.labelCol1 || '',
+          labelCol2: d.labelCol2 || '',
+        })
+      } else {
+        autoDetectConfig(d.columns || [])
       }
     }).catch(() => {})
+  }, [])
+
+  const autoDetectConfig = useCallback((cols: string[]) => {
+    if (!cols.length) { setMarkerConfig(null); return }
+    const lower = cols.map(c => c.toLowerCase())
+    const find = (patterns: RegExp[]) => {
+      for (const p of patterns) { const i = lower.findIndex(c => p.test(c)); if (i >= 0) return cols[i] }
+      return ''
+    }
+    const activeCol = find([/active/, /terpakai/, /used/, /pakai/])
+    const capacityCol = find([/capacit/, /kapasitas/, /total_port/, /totalport/, /port/])
+    const labelCol1 = find([/^(nama|name|label|description|keterangan|alamat|address)$/])
+    const labelCol2 = find([/^(code|kode|odp_name|odp|id_odp|nama_odp|odpcode|odp_code)$/])
+    if (activeCol && capacityCol) {
+      setMarkerConfig({ activeCol, capacityCol, labelCol1, labelCol2 })
+    } else {
+      setMarkerConfig(null)
+    }
   }, [])
 
   const loadStats = useCallback(() => {
@@ -125,17 +99,15 @@ export default function Home() {
     params.set('limit', '25000')
     if (searchQuery) params.set('search', searchQuery)
     if (hasCoord) params.set('hasCoord', hasCoord)
-    customFilters.forEach((cf, i) => {
-      if (cf.field && cf.values.length > 0) {
-        params.set(`cf${i}`, cf.field)
-        params.set(`cv${i}`, cf.values.join(','))
-      }
-    })
+    if (customField && customValues.length > 0) {
+      params.set('customField', customField)
+      params.set('customValues', customValues.join(','))
+    }
     fetch(`/api/data?${params}`).then(r => r.json()).then(d => {
       setPoints(d.data || [])
       setLoading(false)
     }).catch(() => { setLoading(false); toast.error('Gagal memuat data') })
-  }, [searchQuery, hasCoord, customFilters])
+  }, [searchQuery, hasCoord, customField, customValues])
 
   const refreshAll = useCallback(() => { loadStats(); loadColumns(); loadData() }, [loadStats, loadColumns, loadData])
 
@@ -143,11 +115,36 @@ export default function Home() {
   useEffect(() => { loadColumns() }, [loadColumns])
   useEffect(() => { loadData() }, [loadData])
 
-  const handleFiltersChange = useCallback((f: { search: string; hasCoord: string; customFilters: CustomFilterSlot[] }) => {
-    setSearchQuery(f.search); setHasCoord(f.hasCoord); setCustomFilters(f.customFilters); setSelectedPoint(null)
+  const handleFiltersChange = useCallback((f: { search: string; hasCoord: string; customField: string; customValues: string[] }) => {
+    setSearchQuery(f.search); setHasCoord(f.hasCoord); setCustomField(f.customField); setCustomValues(f.customValues)
+    setSelectedPoint(null)
   }, [])
 
-  const filteredWithCoord = points.filter(p => p.latitude !== 0 && p.longitude !== 0).length
+  const handleAlertCount = useCallback((count: number) => {
+    if (count > 0) {
+      toast.warning(`${count.toLocaleString()} ODP kapasitas >=80%!`, { description: 'Titik merah berkedip di peta', duration: 5000 })
+    }
+  }, [])
+
+  const handleExport = useCallback((format: 'csv' | 'xlsx' | 'json') => {
+    const params = new URLSearchParams()
+    params.set('format', format)
+    if (searchQuery) params.set('search', searchQuery)
+    if (hasCoord) params.set('hasCoord', hasCoord)
+    if (customField && customValues.length > 0) {
+      params.set('customField', customField)
+      params.set('customValues', customValues.join(','))
+    }
+    const ext = format === 'xlsx' ? 'xlsx' : format
+    const url = `/api/data/export?${params.toString()}`
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${datasetName || 'data'}.${ext}`
+    document.body.appendChild(a); a.click(); document.body.removeChild(a)
+    toast.success(`Export ${format.toUpperCase()} berhasil!`)
+  }, [searchQuery, hasCoord, customField, customValues, datasetName])
+
+  const totalCoord = points.filter(p => p.latitude !== 0 && p.longitude !== 0).length
 
   return (
     <div className="h-screen flex flex-col bg-slate-100 overflow-hidden">
@@ -157,32 +154,49 @@ export default function Home() {
           <div className="w-7 h-7 rounded-lg bg-emerald-100 flex items-center justify-center"><MapPin className="w-4 h-4 text-emerald-600" /></div>
           <div><h1 className="text-sm font-bold text-slate-800">Map Viewer</h1><p className="text-[10px] text-slate-400">{datasetName || 'Upload Excel untuk mulai'}</p></div>
         </div>
-        <div className="flex items-center gap-1">
-          {stats && stats.total > 0 && (
-            <button className="h-8 px-2 flex items-center gap-1.5 rounded-lg hover:bg-blue-50 text-blue-600" onClick={() => setGoogleEarthOpen(true)}>
-              <Globe className="w-4 h-4" /><span className="text-xs font-medium">KML</span>
-            </button>
-          )}
-          <button className="h-8 w-8 flex items-center justify-center rounded hover:bg-slate-100" onClick={() => setMobileSidebar(!mobileSidebar)}><Menu className="w-4 h-4" /></button>
-        </div>
+        <button className="h-8 w-8 flex items-center justify-center rounded hover:bg-slate-100" onClick={() => setMobileSidebar(!mobileSidebar)}><Menu className="w-4 h-4" /></button>
       </div>
 
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
+        {/* Mobile sidebar */}
         {mobileSidebar && (
           <div className="lg:hidden fixed inset-0 z-40">
             <div className="absolute inset-0 bg-black/30" onClick={() => setMobileSidebar(false)} />
             <div className="relative z-50 w-80 h-full">
-              <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} searchQuery={searchQuery} hasCoord={hasCoord} customFilters={customFilters} markerConfig={markerConfig} onMarkerConfigChange={setMarkerConfig} onFiltersChange={(f) => { handleFiltersChange(f); setMobileSidebar(false) }} onUploadClick={() => { setUploadDialogOpen(true); setMobileSidebar(false) }} onDatasetSwitch={refreshAll} onClose={() => setMobileSidebar(false)} />
+              <FilterSidebar
+                stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo}
+                totalResults={points.length} customField={customField} customValues={customValues}
+                searchQuery={searchQuery} hasCoord={hasCoord}
+                onFiltersChange={(f) => { handleFiltersChange(f); setMobileSidebar(false) }}
+                onUploadClick={() => { setUploadDialogOpen(true); setMobileSidebar(false) }}
+                onDatasetSwitch={refreshAll}
+                onExport={handleExport}
+                onOpenGoogleEarth={() => setGoogleEarthOpen(true)}
+                onOpenColumnMapping={() => setColumnMappingOpen(true)}
+                onClose={() => setMobileSidebar(false)}
+              />
             </div>
           </div>
         )}
 
+        {/* Desktop sidebar */}
         {sidebarOpen && (
           <div className="hidden lg:block shrink-0">
-            <FilterSidebar stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo} totalResults={points.length} searchQuery={searchQuery} hasCoord={hasCoord} customFilters={customFilters} markerConfig={markerConfig} onMarkerConfigChange={setMarkerConfig} onFiltersChange={handleFiltersChange} onUploadClick={() => setUploadDialogOpen(true)} onDatasetSwitch={refreshAll} />
+            <FilterSidebar
+              stats={stats} columns={columns} datasetName={datasetName} coordInfo={coordInfo}
+              totalResults={points.length} customField={customField} customValues={customValues}
+              searchQuery={searchQuery} hasCoord={hasCoord}
+              onFiltersChange={handleFiltersChange}
+              onUploadClick={() => setUploadDialogOpen(true)}
+              onDatasetSwitch={refreshAll}
+              onExport={handleExport}
+              onOpenGoogleEarth={() => setGoogleEarthOpen(true)}
+              onOpenColumnMapping={() => setColumnMappingOpen(true)}
+            />
           </div>
         )}
 
+        {/* Map area */}
         <div className="flex-1 relative min-h-0 min-w-0">
           {!sidebarOpen && (
             <button className="absolute top-4 left-4 z-[1000] h-9 w-9 bg-white rounded-lg shadow-lg flex items-center justify-center hover:bg-slate-50" onClick={() => setSidebarOpen(true)}><Menu className="w-4 h-4" /></button>
@@ -191,23 +205,17 @@ export default function Home() {
             <button className="hidden lg:flex absolute top-4 left-[21rem] z-[1000] h-9 w-9 bg-white rounded-lg shadow-lg items-center justify-center hover:bg-slate-50" onClick={() => setSidebarOpen(false)}><PanelRightClose className="w-4 h-4" /></button>
           )}
 
-          {stats && stats.total > 0 && (
-            <button className="absolute top-4 right-4 z-[1000] h-9 px-3 bg-white rounded-lg shadow-lg flex items-center gap-2 hover:bg-blue-50 text-blue-600 font-medium text-xs transition-colors" onClick={() => setGoogleEarthOpen(true)}>
-              <Globe className="w-4 h-4" /><span className="hidden sm:inline">Export Google Earth</span>
-            </button>
-          )}
-
-          <ODPMap points={points} loading={loading} selectedPoint={selectedPoint} onSelectPoint={setSelectedPoint} columns={columns} markerConfig={markerConfig} />
+          <ODPMap points={points} loading={loading} selectedPoint={selectedPoint} onSelectPoint={setSelectedPoint} columns={columns} markerConfig={markerConfig} onAlertCount={handleAlertCount} />
 
           {selectedPoint && (
             <div className="hidden md:block absolute right-0 top-0 h-full z-[999]">
-              <ODPDetailPanel point={selectedPoint} columns={columns} markerConfig={markerConfig} onClose={() => setSelectedPoint(null)} />
+              <ODPDetailPanel point={selectedPoint} columns={columns} onClose={() => setSelectedPoint(null)} />
             </div>
           )}
           {selectedPoint && (
             <div className="md:hidden absolute bottom-0 left-0 right-0 z-[999] max-h-[60vh] overflow-y-auto rounded-t-2xl shadow-2xl bg-white">
               <div className="flex justify-center py-2"><div className="w-10 h-1 rounded-full bg-slate-300" /></div>
-              <ODPDetailPanel point={selectedPoint} columns={columns} markerConfig={markerConfig} onClose={() => setSelectedPoint(null)} />
+              <ODPDetailPanel point={selectedPoint} columns={columns} onClose={() => setSelectedPoint(null)} />
             </div>
           )}
 
@@ -216,7 +224,7 @@ export default function Home() {
               <div className="text-center p-8 bg-white/80 backdrop-blur-sm rounded-2xl shadow-xl max-w-sm">
                 <div className="w-16 h-16 rounded-2xl bg-emerald-100 flex items-center justify-center mx-auto mb-4"><Upload className="w-8 h-8 text-emerald-600" /></div>
                 <h2 className="text-lg font-bold text-slate-800 mb-2">Belum Ada Data</h2>
-                <p className="text-sm text-slate-500 mb-4">Upload file Excel yang berisi data koordinat. Format apapun bisa!</p>
+                <p className="text-sm text-slate-500 mb-4">Upload file Excel yang berisi data koordinat.</p>
                 <button className="px-6 py-2.5 bg-emerald-600 text-white rounded-lg text-sm font-medium hover:bg-emerald-700" onClick={() => setUploadDialogOpen(true)}>Upload Excel</button>
               </div>
             </div>
@@ -225,13 +233,17 @@ export default function Home() {
       </div>
 
       <UploadExcelDialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen} onUploadComplete={refreshAll} />
-
-            <GoogleEarthDialog
+      <GoogleEarthDialog
         open={googleEarthOpen} onOpenChange={setGoogleEarthOpen}
-        filters={{ search: searchQuery, hasCoord, customFilters }}
-        markerConfig={markerConfig}
-        filteredCount={filteredWithCoord} totalCount={stats?.withCoord || 0} datasetName={datasetName}
+        filters={{ search: searchQuery, hasCoord, customField, customValues }}
+        filteredCount={totalCoord} totalCount={stats?.withCoord || 0}
         columns={columns}
+      />
+      <ColumnMappingDialog
+        open={columnMappingOpen} onOpenChange={setColumnMappingOpen}
+        columns={columns} datasetId={datasetId}
+        currentMapping={currentMapping}
+        onMappingSaved={refreshAll}
       />
     </div>
   )

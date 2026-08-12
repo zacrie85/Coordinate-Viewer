@@ -1,12 +1,12 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import {
   Search, X, ChevronDown, ChevronUp, MapPin, Database, Upload,
   Trash2, Crosshair, Filter, ArrowUpFromLine, Layers, Eye,
+  Download, Globe, Settings2, FileSpreadsheet,
 } from 'lucide-react'
 import { toast } from 'sonner'
-import type { CustomFilterSlot, MarkerConfig } from '@/app/page'
 
 interface StatsData {
   total: number
@@ -40,7 +40,8 @@ interface DatasetItem {
 interface FilterValues {
   search: string
   hasCoord: string
-  customFilters: CustomFilterSlot[]
+  customField: string
+  customValues: string[]
 }
 
 interface FilterSidebarProps {
@@ -49,14 +50,16 @@ interface FilterSidebarProps {
   datasetName: string
   coordInfo: { latCol: string | null; lngCol: string | null; coordCol: string | null }
   totalResults: number
+  customField: string
+  customValues?: string[]
   searchQuery: string
   hasCoord: string
-  customFilters: CustomFilterSlot[]
-  markerConfig: MarkerConfig
-  onMarkerConfigChange: (mc: MarkerConfig) => void
   onFiltersChange: (f: FilterValues) => void
   onUploadClick: () => void
   onDatasetSwitch: () => void
+  onExport?: (format: 'csv' | 'xlsx' | 'json') => void
+  onOpenGoogleEarth?: () => void
+  onOpenColumnMapping?: () => void
   onClose?: () => void
 }
 
@@ -72,119 +75,24 @@ function FilterItem({ value, count, checked, onToggle }: {
   )
 }
 
-// Single column filter slot component
-function ColumnFilterSlot({
-  index,
-  slot,
-  columns,
-  onSlotChange,
-}: {
-  index: number
-  slot: CustomFilterSlot
-  columns: string[]
-  onSlotChange: (index: number, updated: CustomFilterSlot) => void
-}) {
+export default function FilterSidebar({
+  stats, columns: columnsProp, datasetName, coordInfo, totalResults,
+  customField, customValues: customValuesProp, searchQuery, hasCoord,
+  onFiltersChange, onUploadClick, onDatasetSwitch,
+  onExport, onOpenGoogleEarth, onOpenColumnMapping, onClose
+}: FilterSidebarProps) {
+  const customValues = customValuesProp ?? []
+  const columns = columnsProp ?? []
+
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
+    datasets: true, search: true, coordinate: true, filter: true,
+  })
   const [sectionSearch, setSectionSearch] = useState('')
   const [fieldValues, setFieldValues] = useState<{ value: string; count: number }[]>([])
   const [fieldLoading, setFieldLoading] = useState(false)
-
-  // Load field values when slot.field changes
-  useEffect(() => {
-    if (!slot.field) { setFieldValues([]); return }
-    setFieldLoading(true)
-    setSectionSearch('')
-    fetch(`/api/data/field-values?field=${encodeURIComponent(slot.field)}`)
-      .then(r => r.json())
-      .then(data => { setFieldValues(Array.isArray(data) ? data : []); setFieldLoading(false) })
-      .catch(() => setFieldLoading(false))
-  }, [slot.field])
-
-  const toggleValue = (val: string) => {
-    const updated = slot.values.includes(val)
-      ? slot.values.filter(v => v !== val)
-      : [...slot.values, val]
-    onSlotChange(index, { ...slot, values: updated })
-  }
-
-  const clearSlot = () => {
-    setSectionSearch('')
-    onSlotChange(index, { field: '', values: [] })
-  }
-
-  const filteredValues = useMemo(() => {
-    if (!sectionSearch) return fieldValues
-    const q = sectionSearch.toLowerCase()
-    return fieldValues.filter(v => v.value.toLowerCase().includes(q))
-  }, [fieldValues, sectionSearch])
-
-  // Columns available (exclude columns used by other slots)
-  const usedCols = new Set<string>()
-  columns.forEach(() => {}) // just for reference
-
-  return (
-    <div className={`rounded-lg border p-2.5 space-y-2 ${slot.field ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200 bg-slate-50/50'}`}>
-      <div className="flex items-center justify-between">
-        <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">Filter {index + 1}</span>
-        {slot.field && (
-          <button onClick={clearSlot} className="text-slate-400 hover:text-red-500 transition-colors" title="Reset filter ini">
-            <X className="w-3.5 h-3.5" />
-          </button>
-        )}
-      </div>
-
-      <select
-        className="w-full h-8 px-3 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
-        value={slot.field}
-        onChange={(e) => onSlotChange(index, { field: e.target.value, values: [] })}
-      >
-        <option value="">-- Pilih Kolom --</option>
-        {columns.map(c => <option key={c} value={c}>{c}</option>)}
-      </select>
-
-      {slot.field && (
-        fieldLoading ? (
-          <div className="flex items-center justify-center py-3">
-            <div className="w-4 h-4 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-            <span className="ml-2 text-[11px] text-slate-400">Memuat...</span>
-          </div>
-        ) : (
-          <>
-            <div className="relative">
-              <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3 h-3 text-slate-400" />
-              <input placeholder="Cari nilai..." className="w-full pl-8 h-7 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500/30 bg-white" value={sectionSearch} onChange={(e) => setSectionSearch(e.target.value)} />
-            </div>
-            <div className="max-h-36 overflow-y-auto space-y-0.5">
-              {filteredValues.slice(0, 50).map(v => (
-                <FilterItem key={v.value} value={v.value} count={v.count} checked={slot.values.includes(v.value)} onToggle={() => toggleValue(v.value)} />
-              ))}
-              {filteredValues.length > 50 && <p className="px-3 py-1 text-[10px] text-slate-400 italic">+ {filteredValues.length - 50} lainnya...</p>}
-              {filteredValues.length === 0 && !fieldLoading && <p className="px-3 py-2 text-xs text-slate-400">Tidak ada data</p>}
-            </div>
-            {slot.values.length > 0 && (
-              <div className="text-[10px] text-emerald-600 font-medium px-1">
-                {slot.values.length} nilai dipilih
-              </div>
-            )}
-          </>
-        )
-      )}
-
-      {!slot.field && (
-        <p className="text-[10px] text-slate-400 px-1">Pilih kolom untuk memfilter</p>
-      )}
-    </div>
-  )
-}
-
-export default function FilterSidebar({
-  stats, columns, datasetName, coordInfo, totalResults,
-  searchQuery, hasCoord, customFilters, markerConfig, onMarkerConfigChange,
-  onFiltersChange, onUploadClick, onDatasetSwitch, onClose
-}: FilterSidebarProps) {
-  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({
-    datasets: true, search: true, coordinate: true, filter: true, display: true,
-  })
   const [datasets, setDatasets] = useState<DatasetItem[]>([])
+  const [exportMenuOpen, setExportMenuOpen] = useState(false)
+  const exportRef = useRef<HTMLDivElement>(null)
 
   const toggleSection = (s: string) => setExpandedSections(p => ({ ...p, [s]: !p[s] }))
 
@@ -193,34 +101,44 @@ export default function FilterSidebar({
     fetch('/api/datasets').then(r => r.json()).then(setDatasets).catch(() => {})
   }, [])
 
-  const activeCustomCount = useMemo(() => {
-    return customFilters.reduce((acc, cf) => acc + cf.values.length, 0)
-  }, [customFilters])
+  // Close export menu on outside click
+  useEffect(() => {
+    if (!exportMenuOpen) return
+    const handler = (e: MouseEvent) => {
+      if (exportRef.current && !exportRef.current.contains(e.target as Node)) {
+        setExportMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [exportMenuOpen])
 
-  const totalFilterCount = useMemo(() => {
+  // Load field values when customField changes
+  useEffect(() => {
+    if (!customField) { setFieldValues([]); return }
+    setFieldLoading(true)
+    fetch(`/api/data/field-values?field=${encodeURIComponent(customField)}`)
+      .then(r => r.json())
+      .then(data => { setFieldValues(Array.isArray(data) ? data : []); setFieldLoading(false) })
+      .catch(() => setFieldLoading(false))
+  }, [customField])
+
+  const activeFilterCount = useMemo(() => {
     let c = 0
     if (searchQuery) c++
     if (hasCoord) c++
-    c += activeCustomCount
+    if (customValues.length) c++
     return c
-  }, [searchQuery, hasCoord, activeCustomCount])
+  }, [searchQuery, hasCoord, customValues])
 
-  const handleSlotChange = (index: number, updated: CustomFilterSlot) => {
-    const newFilters = [...customFilters]
-    newFilters[index] = updated
-    onFiltersChange({ search: searchQuery, hasCoord, customFilters: newFilters })
+  const toggleValue = (val: string) => {
+    const updated = customValues.includes(val) ? customValues.filter(v => v !== val) : [...customValues, val]
+    onFiltersChange({ search: searchQuery, hasCoord, customField, customValues: updated })
   }
 
   const clearFilters = () => {
-    onFiltersChange({
-      search: '',
-      hasCoord: '',
-      customFilters: [
-        { field: '', values: [] },
-        { field: '', values: [] },
-        { field: '', values: [] },
-      ],
-    })
+    setSectionSearch('')
+    onFiltersChange({ search: '', hasCoord: '', customField: '', customValues: [] })
   }
 
   const activateDataset = async (id: string) => {
@@ -235,6 +153,12 @@ export default function FilterSidebar({
     toast.success('Dataset dihapus')
     onDatasetSwitch()
   }
+
+  const filteredValues = useMemo(() => {
+    if (!sectionSearch) return fieldValues
+    const q = sectionSearch.toLowerCase()
+    return fieldValues.filter(v => v.value.toLowerCase().includes(q))
+  }, [fieldValues, sectionSearch])
 
   return (
     <div className="w-80 bg-white border-r border-slate-200 flex flex-col h-full">
@@ -251,20 +175,46 @@ export default function FilterSidebar({
             </div>
           </div>
           <div className="flex items-center gap-1">
-            {totalFilterCount > 0 && <span className="h-5 px-1.5 text-[10px] bg-emerald-500 text-white rounded-full font-medium">{totalFilterCount}</span>}
+            {activeFilterCount > 0 && <span className="h-5 px-1.5 text-[10px] bg-emerald-500 text-white rounded-full font-medium">{activeFilterCount}</span>}
             {onClose && <button className="lg:hidden h-8 w-8 flex items-center justify-center rounded hover:bg-slate-100" onClick={onClose}><X className="w-4 h-4" /></button>}
           </div>
         </div>
 
         {/* Action buttons */}
-        <div className="flex gap-2">
-          <button onClick={onUploadClick} className="flex-1 flex items-center gap-2 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors text-left">
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={onUploadClick} className="flex items-center gap-2 px-3 py-2 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition-colors text-left">
             <div className="w-6 h-6 rounded bg-emerald-500 flex items-center justify-center shrink-0"><ArrowUpFromLine className="w-3.5 h-3.5 text-white" /></div>
             <div className="min-w-0"><div className="text-xs font-semibold text-emerald-800">Upload</div><div className="text-[10px] text-emerald-500">Excel</div></div>
           </button>
-          <button onClick={onUploadClick} className="flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left">
-            <div className="w-6 h-6 rounded bg-blue-500 flex items-center justify-center shrink-0"><Layers className="w-3.5 h-3.5 text-white" /></div>
-            <div className="min-w-0"><div className="text-xs font-semibold text-blue-800">Dataset</div><div className="text-[10px] text-blue-500">Switch</div></div>
+          <button onClick={() => onOpenColumnMapping?.()} className="flex items-center gap-2 px-3 py-2 bg-violet-50 hover:bg-violet-100 rounded-lg transition-colors text-left">
+            <div className="w-6 h-6 rounded bg-violet-500 flex items-center justify-center shrink-0"><Settings2 className="w-3.5 h-3.5 text-white" /></div>
+            <div className="min-w-0"><div className="text-xs font-semibold text-violet-800">Kolom</div><div className="text-[10px] text-violet-500">Mapping</div></div>
+          </button>
+          <div className="relative" ref={exportRef}>
+            <button onClick={() => setExportMenuOpen(!exportMenuOpen)} className="flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors text-left w-full">
+              <div className="w-6 h-6 rounded bg-blue-500 flex items-center justify-center shrink-0"><Download className="w-3.5 h-3.5 text-white" /></div>
+              <div className="min-w-0"><div className="text-xs font-semibold text-blue-800">Export</div><div className="text-[10px] text-blue-500">CSV / Excel</div></div>
+            </button>
+            {exportMenuOpen && (
+              <div className="absolute top-full left-0 right-0 mt-1 bg-white rounded-lg shadow-xl border border-slate-200 z-50 overflow-hidden">
+                <button onClick={() => { onExport?.('xlsx'); setExportMenuOpen(false) }} className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-emerald-50 text-left transition-colors">
+                  <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+                  <div><div className="text-xs font-semibold text-slate-700">Excel (.xlsx)</div><div className="text-[10px] text-slate-400">Spreadsheet format</div></div>
+                </button>
+                <button onClick={() => { onExport?.('csv'); setExportMenuOpen(false) }} className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-blue-50 text-left transition-colors">
+                  <Download className="w-4 h-4 text-blue-600" />
+                  <div><div className="text-xs font-semibold text-slate-700">CSV</div><div className="text-[10px] text-slate-400">Comma-separated values</div></div>
+                </button>
+                <button onClick={() => { onExport?.('json'); setExportMenuOpen(false) }} className="w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-slate-50 text-left transition-colors">
+                  <Download className="w-4 h-4 text-slate-400" />
+                  <div><div className="text-xs font-semibold text-slate-700">JSON</div><div className="text-[10px] text-slate-400">Raw data format</div></div>
+                </button>
+              </div>
+            )}
+          </div>
+          <button onClick={() => onOpenGoogleEarth?.()} className="flex items-center gap-2 px-3 py-2 bg-orange-50 hover:bg-orange-100 rounded-lg transition-colors text-left">
+            <div className="w-6 h-6 rounded bg-orange-500 flex items-center justify-center shrink-0"><Globe className="w-3.5 h-3.5 text-white" /></div>
+            <div className="min-w-0"><div className="text-xs font-semibold text-orange-800">Google</div><div className="text-[10px] text-orange-500">Earth</div></div>
           </button>
         </div>
       </div>
@@ -347,10 +297,10 @@ export default function FilterSidebar({
                 placeholder="Cari di semua kolom..."
                 className="w-full pl-9 pr-8 h-9 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500"
                 value={searchQuery}
-                onChange={(e) => onFiltersChange({ search: e.target.value, hasCoord, customFilters })}
+                onChange={(e) => onFiltersChange({ search: e.target.value, hasCoord, customField, customValues })}
               />
               {searchQuery && (
-                <button className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" onClick={() => onFiltersChange({ search: '', hasCoord, customFilters })}><X className="w-3.5 h-3.5" /></button>
+                <button className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600" onClick={() => onFiltersChange({ search: '', hasCoord, customField, customValues })}><X className="w-3.5 h-3.5" /></button>
               )}
             </div>
           )}
@@ -367,23 +317,19 @@ export default function FilterSidebar({
           {expandedSections.coordinate && stats && (
             <div className="space-y-0.5">
               <FilterItem value="Ada Koordinat" count={stats.withCoord} checked={hasCoord === 'true'}
-                onToggle={() => onFiltersChange({ search: searchQuery, hasCoord: hasCoord === 'true' ? '' : 'true', customFilters })} />
+                onToggle={() => onFiltersChange({ search: searchQuery, hasCoord: hasCoord === 'true' ? '' : 'true', customField, customValues })} />
               <FilterItem value="Tanpa Koordinat" count={stats.withoutCoord} checked={hasCoord === 'false'}
-                onToggle={() => onFiltersChange({ search: searchQuery, hasCoord: hasCoord === 'false' ? '' : 'false', customFilters })} />
+                onToggle={() => onFiltersChange({ search: searchQuery, hasCoord: hasCoord === 'false' ? '' : 'false', customField, customValues })} />
             </div>
           )}
         </div>
 
         <hr className="border-slate-100" />
 
-        {/* DYNAMIC COLUMN FILTERS — 3 SLOTS */}
+        {/* DYNAMIC COLUMN FILTER */}
         <div>
           <button className="flex items-center justify-between w-full text-sm font-semibold text-slate-700 mb-2" onClick={() => toggleSection('filter')}>
-            <div className="flex items-center gap-2">
-              <Filter className="w-4 h-4" />
-              Filter Kolom
-              {activeCustomCount > 0 && <span className="h-4 px-1.5 text-[10px] bg-emerald-500 text-white rounded-full">{activeCustomCount}</span>}
-            </div>
+            <div className="flex items-center gap-2"><Filter className="w-4 h-4" /> Filter Kolom {customValues.length > 0 && <span className="h-4 px-1.5 text-[10px] bg-emerald-500 text-white rounded-full">{customValues.length}</span>}</div>
             {expandedSections.filter ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
           </button>
           {expandedSections.filter && (
@@ -391,134 +337,52 @@ export default function FilterSidebar({
               {columns.length === 0 ? (
                 <p className="text-[11px] text-slate-400 px-1">Upload Excel dulu untuk melihat filter kolom</p>
               ) : (
-                <div className="space-y-3">
-                  {customFilters.map((slot, i) => (
-                    <ColumnFilterSlot
-                      key={i}
-                      index={i}
-                      slot={slot}
-                      columns={columns}
-                      onSlotChange={handleSlotChange}
-                    />
-                  ))}
-                </div>
+                <>
+                  <select
+                    className="w-full h-8 px-3 text-xs border border-slate-200 rounded-lg bg-white text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500 mb-2"
+                    value={customField}
+                    onChange={(e) => onFiltersChange({ search: searchQuery, hasCoord, customField: e.target.value, customValues: [] })}
+                  >
+                    <option value="">-- Pilih Kolom --</option>
+                    {columns.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+
+                  {customField && (
+                    fieldLoading ? (
+                      <div className="flex items-center justify-center py-4">
+                        <div className="w-5 h-5 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+                        <span className="ml-2 text-xs text-slate-400">Memuat...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="relative mb-2">
+                          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                          <input placeholder="Cari nilai..." className="w-full pl-8 h-7 text-xs border border-slate-200 rounded-md focus:outline-none focus:ring-2 focus:ring-emerald-500/30" value={sectionSearch} onChange={(e) => setSectionSearch(e.target.value)} />
+                        </div>
+                        <div className="max-h-48 overflow-y-auto space-y-0.5">
+                          {filteredValues.slice(0, 50).map(v => (
+                            <FilterItem key={v.value} value={v.value} count={v.count} checked={customValues.includes(v.value)} onToggle={() => toggleValue(v.value)} />
+                          ))}
+                          {filteredValues.length > 50 && <p className="px-3 py-1 text-[10px] text-slate-400 italic">+ {filteredValues.length - 50} lainnya...</p>}
+                          {filteredValues.length === 0 && !fieldLoading && <p className="px-3 py-2 text-xs text-slate-400">Tidak ada data</p>}
+                        </div>
+                      </>
+                    )
+                  )}
+
+                  {!customField && <p className="text-[10px] text-slate-400 px-1">Pilih kolom di atas untuk memfilter</p>}
+                </>
               )}
             </div>
           )}
         </div>
       </div>
 
-        <hr className="border-slate-100" />
-
-        {/* AUTO-DETECT INFO + OVERRIDE */}
-        <div>
-          <button className="flex items-center justify-between w-full text-sm font-semibold text-slate-700 mb-2" onClick={() => toggleSection('display')}>
-            <div className="flex items-center gap-2"><Eye className="w-4 h-4" /> Warna & Nama Marker</div>
-            {expandedSections.display ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-          </button>
-          {expandedSections.display && (
-            <div className="space-y-2.5">
-              {/* Auto-detect status */}
-              <div className="bg-emerald-50 border border-emerald-200 rounded-lg p-2.5">
-                <div className="flex items-center gap-1.5 mb-1.5">
-                  <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-                  <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wide">Auto-Detected</span>
-                </div>
-                <div className="space-y-1 text-[11px]">
-                  {markerConfig.capacityCol && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Kapasitas:</span>
-                      <span className="font-semibold text-slate-700">{markerConfig.capacityCol}</span>
-                    </div>
-                  )}
-                  {markerConfig.activeCol && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Status:</span>
-                      <span className="font-semibold text-slate-700">{markerConfig.activeCol}</span>
-                    </div>
-                  )}
-                  {markerConfig.nameCol1 && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Nama:</span>
-                      <span className="font-semibold text-slate-700 truncate max-w-[140px]">{markerConfig.nameCol1}{markerConfig.nameCol2 ? ` - ${markerConfig.nameCol2}` : ''}</span>
-                    </div>
-                  )}
-                  {!markerConfig.capacityCol && !markerConfig.activeCol && !markerConfig.nameCol1 && (
-                    <p className="text-slate-400 italic">Tidak ada kolom yang terdeteksi otomatis</p>
-                  )}
-                </div>
-              </div>
-              {/* Color legend */}
-              <div>
-                <div className="text-[10px] text-slate-400 font-medium mb-1">Warna Kapasitas</div>
-                <div className="grid grid-cols-2 gap-1">
-                  {[{c:'#22c55e',l:'0-25%'},{c:'#3b82f6',l:'26-50%'},{c:'#eab308',l:'51-75%'},{c:'#ef4444',l:'76-100%'}].map(x => (
-                    <div key={x.l} className="flex items-center gap-1.5 text-[10px] text-slate-600">
-                      <div className="w-3 h-3 rounded-full shrink-0" style={{backgroundColor:x.c, boxShadow:`0 0 6px ${x.c}40`}} />{x.l}
-                    </div>
-                  ))}
-                </div>
-              </div>
-              {/* Override dropdowns (collapsed by default feel) */}
-              <details className="group">
-                <summary className="text-[10px] text-slate-400 cursor-pointer hover:text-slate-600 transition-colors flex items-center gap-1">
-                  <ChevronDown className="w-3 h-3 group-open:rotate-180 transition-transform" />
-                  Override kolom manual
-                </summary>
-                <div className="mt-2 space-y-2 pl-1">
-                  <div>
-                    <label className="text-[10px] text-slate-500 mb-0.5 block">Kapasitas (warna)</label>
-                    <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-                      value={markerConfig.capacityCol} onChange={e => onMarkerConfigChange({ ...markerConfig, capacityCol: e.target.value })}>
-                      <option value="">-- Pilih --</option>
-                      {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-[10px] text-slate-500 mb-0.5 block">Status</label>
-                      <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-                        value={markerConfig.activeCol} onChange={e => onMarkerConfigChange({ ...markerConfig, activeCol: e.target.value })}>
-                        <option value="">-- Pilih --</option>
-                        {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-[10px] text-slate-500 mb-0.5 block">Ketersediaan</label>
-                      <select className="w-full h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-                        value={markerConfig.availCol} onChange={e => onMarkerConfigChange({ ...markerConfig, availCol: e.target.value })}>
-                        <option value="">-- Pilih --</option>
-                        {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] text-slate-500 mb-0.5 block">Nama Marker (2 kolom)</label>
-                    <div className="flex gap-1 items-center">
-                      <select className="flex-1 h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-                        value={markerConfig.nameCol1} onChange={e => onMarkerConfigChange({ ...markerConfig, nameCol1: e.target.value })}>
-                        <option value="">Kolom 1</option>
-                        {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                      <span className="text-slate-300 text-xs">-</span>
-                      <select className="flex-1 h-7 px-2 text-[11px] border border-slate-200 rounded bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500/30"
-                        value={markerConfig.nameCol2} onChange={e => onMarkerConfigChange({ ...markerConfig, nameCol2: e.target.value })}>
-                        <option value="">Kolom 2</option>
-                        {columns.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
-                  </div>
-                </div>
-              </details>
-            </div>
-          )}
-        </div>
-
       {/* Footer */}
-      {totalFilterCount > 0 && (
+      {activeFilterCount > 0 && (
         <div className="p-4 border-t border-slate-200">
           <button className="w-full py-2 border border-slate-200 rounded-lg text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors flex items-center justify-center gap-2" onClick={clearFilters}>
-            <X className="w-3 h-3" /> Hapus Semua Filter ({totalFilterCount})
+            <X className="w-3 h-3" /> Hapus Semua Filter ({customValues.length} item)
           </button>
         </div>
       )}
