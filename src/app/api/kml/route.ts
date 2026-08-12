@@ -29,19 +29,34 @@ function calcPct(meta: Record<string, any>, activeCol: string, capacityCol: stri
   return { pct: -1, activeRaw: '', capRaw: '' }
 }
 
+// Warna persentase
+function pctColor(pct: number): string {
+  if (pct <= 25) return '#22c55e'
+  if (pct <= 50) return '#3b82f6'
+  if (pct <= 75) return '#eab308'
+  return '#ef4444'
+}
+
 function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capacityCol: string; activeCol: string; availCol: string; labelCols?: string[] }, i: number, meta: Record<string, any>): string {
-  const descParts: string[] = []
   const { pct, activeRaw, capRaw } = calcPct(meta, mc.activeCol, mc.capacityCol)
+  const color = pct >= 0 ? pctColor(pct) : '#64748b'
+
+  // Bangun baris tabel untuk description
+  const rows: string[] = []
+
   if (pct >= 0) {
-    descParts.push(`<b>${escapeXml(mc.activeCol || 'Active')}:</b> ${escapeXml(activeRaw)}`)
-    descParts.push(`<b>${escapeXml(mc.capacityCol || 'Capacity')}:</b> ${escapeXml(capRaw)}`)
-    descParts.push(`<b>Persentase:</b> ${Math.round(pct)}%`)
+    rows.push(`<tr><td class="lbl">${escapeXml(mc.activeCol || 'Active')}</td><td class="val" style="font-weight:700;color:${color};">${escapeXml(activeRaw)}</td></tr>`)
+    rows.push(`<tr><td class="lbl">${escapeXml(mc.capacityCol || 'Capacity')}</td><td class="val">${escapeXml(capRaw)}</td></tr>`)
+    rows.push(`<tr><td class="lbl">Persentase</td><td class="val" style="font-weight:700;color:${color};">${Math.round(pct)}%</td></tr>`)
   }
-  if (mc.availCol && meta[mc.availCol] && mc.availCol !== mc.activeCol) descParts.push(`<b>${escapeXml(mc.availCol)}:</b> ${escapeXml(String(meta[mc.availCol]))}`)
+  if (mc.availCol && meta[mc.availCol] && mc.availCol !== mc.activeCol) {
+    rows.push(`<tr><td class="lbl">${escapeXml(mc.availCol)}</td><td class="val">${escapeXml(String(meta[mc.availCol]))}</td></tr>`)
+  }
+
   const skipCols = new Set([mc.nameCol1, mc.nameCol2, mc.capacityCol, mc.activeCol, mc.availCol].filter(Boolean))
   for (const [k, v] of Object.entries(meta)) {
     if (skipCols.has(k) || !v || v === '') continue
-    descParts.push(`<b>${escapeXml(k)}:</b> ${escapeXml(String(v))}`)
+    rows.push(`<tr><td class="lbl">${escapeXml(k)}</td><td class="val">${escapeXml(String(v))}</td></tr>`)
   }
 
   // Label: prioritaskan labelCols > nameCol1/nameCol2 > fallback
@@ -55,11 +70,27 @@ function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capaci
       : meta['name'] || meta['Name'] || meta['NAMA'] || meta['nama'] || meta['KODE'] || meta['kode'] || `Point ${i + 1}`
   }
 
+  // Progress bar (hanya jika ada persentase)
+  const barHtml = pct >= 0 ? `
+    <div style="margin-top:10px;padding:8px 10px;background:rgba(0,0,0,0.04);border-radius:6px;">
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px;">
+        <span>${escapeXml(mc.activeCol || 'Active')}: ${escapeXml(activeRaw)} / ${escapeXml(capRaw)}</span>
+        <span style="font-weight:700;color:${color};">${Math.round(pct)}%</span>
+      </div>
+      <div style="background:#e2e8f0;border-radius:4px;height:8px;overflow:hidden;">
+        <div style="background:${color};height:100%;width:${Math.min(pct, 100)}%;border-radius:4px;"></div>
+      </div>
+    </div>` : ''
+
   // FIX: Gunakan built-in Google Earth icon (bukan URL pushpin yang deprecated)
   const styleUrl = pct >= 0 ? `#s-${pct <= 25 ? 'g' : pct <= 50 ? 'b' : pct <= 75 ? 'y' : 'r'}` : '#s-default'
   return `      <Placemark>
         <name>${escapeXml(String(name))}</name>
-        <description><![CDATA[${descParts.join('<br/>')}]]></description>
+        <description><![CDATA[<div style="font-family:Arial,Helvetica,sans-serif;font-size:14px;color:#1e293b;min-width:320px;line-height:1.6;">
+  <table style="font-size:14px;border-collapse:collapse;width:100%;">
+    ${rows.join('\n    ')}
+  </table>${barHtml}
+</div>]]></description>
         <styleUrl>${styleUrl}</styleUrl>
         <Point><coordinates>${p.longitude},${p.latitude},0</coordinates></Point>
       </Placemark>`
@@ -116,14 +147,14 @@ export async function GET(req: NextRequest) {
 
     const points = await db.dataPoint.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 })
 
-    // FIX: Gunakan default pushpin Google Earth + color override (ABGR format)
-    // Tidak pakai external URL yang bisa diblokir/dibatasi aksesnya
-        const styles = `
-    <Style id="s-default"><IconStyle><scale>1.0</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ff000000</color></LabelStyle></Style>
-    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ffFFA500</color></LabelStyle></Style>
-    <Style id="s-b"><IconStyle><color>ffff0000</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ffFFA500</color></LabelStyle></Style>
-    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ffFFA500</color></LabelStyle></Style>
-        <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ffFFA500</color></LabelStyle></Style>`
+    // FIX: Styles dengan BalloonStyle putih transparan 30% (opacity 70% = B3 hex)
+    // KML color format: AABBGGRR → B3 = 70% opacity, FFFFFF = putih
+    const styles = `
+    <Style id="s-default"><IconStyle><scale>1.0</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>b3ffffff</bgColor><text><![CDATA[<b>$[name]</b><br/>$[description]]></text></BalloonStyle></Style>
+    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ff00FFFF</color></LabelStyle><BalloonStyle><bgColor>b3ffffff</bgColor><text><![CDATA[<b>$[name]</b><br/>$[description]]></text></BalloonStyle></Style>
+    <Style id="s-b"><IconStyle><color>ffff0000</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ff00FFFF</color></LabelStyle><BalloonStyle><bgColor>b3ffffff</bgColor><text><![CDATA[<b>$[name]</b><br/>$[description]]></text></BalloonStyle></Style>
+    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ff00FFFF</color></LabelStyle><BalloonStyle><bgColor>b3ffffff</bgColor><text><![CDATA[<b>$[name]</b><br/>$[description]]></text></BalloonStyle></Style>
+    <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ff00FFFF</color></LabelStyle><BalloonStyle><bgColor>b3ffffff</bgColor><text><![CDATA[<b>$[name]</b><br/>$[description]]></text></BalloonStyle></Style>`
 
     let foldersXml = ''
     if (groupBy && points.length > 0) {
