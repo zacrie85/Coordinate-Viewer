@@ -150,11 +150,11 @@ export async function GET(req: NextRequest) {
     const points = await db.dataPoint.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 })
 
     const styles = `
-    <Style id="s-default"><IconStyle><scale>1.5</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.5</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ffFFA500</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-b"><IconStyle><color>ffff0000</color><scale>1.5</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ffFFA500</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.5</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ffFFA500</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.5</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ffFFA500</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>`
+    <Style id="s-default"><IconStyle><scale>1.0</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-b"><IconStyle><color>ffff0000</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>`
 
     let foldersXml = ''
     if (groupBy && points.length > 0) {
