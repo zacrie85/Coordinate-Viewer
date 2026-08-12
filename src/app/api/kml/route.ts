@@ -138,7 +138,7 @@ export async function GET(req: NextRequest) {
     } else {
       const folderName = areaIds ? `${active.name} (Area Selection - ${points.length} titik)` : active.name
       const marks = points.map((p, i) => buildPlacemark(p, mc, i, (p.metadata as Record<string, any>) || {})).join('\n')
-      foldersXml = `    <Folder><name>${escapeXml(folderName)}\n${marks}\n    </Folder>\n`
+      foldersXml = `    <Folder><name>${escapeXml(folderName)}</name>\n${marks}\n    </Folder>\n`
     }
 
     const kml = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>${escapeXml(active.name)}</name>\n    <description>${escapeXml(active.name)} - ${points.length} titik</description>\n${styles}\n${foldersXml}  </Document>\n</kml>`
