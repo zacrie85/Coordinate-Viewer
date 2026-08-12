@@ -8,7 +8,6 @@ function escapeXml(s: string): string {
     .replace(/"/g, '&quot;').replace(/'/g, '&apos;')
 }
 
-// ── Hitung persentase: Active / Capacity × 100 ──
 function calcPct(meta: Record<string, any>, activeCol: string, capacityCol: string): { pct: number; activeRaw: string; capRaw: string } {
   if (activeCol && capacityCol) {
     const aRaw = String(meta[activeCol] ?? '').trim()
@@ -79,15 +78,15 @@ function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capaci
   const styleUrl = pct >= 0 ? `#s-${pct <= 25 ? 'g' : pct <= 50 ? 'b' : pct <= 75 ? 'y' : 'r'}` : '#s-default'
   return `      <Placemark>
         <name>${escapeXml(String(name))}</name>
-        <description><![CDATA[<div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;color:#ffffff;min-width:340px;line-height:1.5;overflow:hidden;">
+        <description><![CDATA[<div style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;color:#ffffff;min-width:300px;max-height:280px;overflow-y:auto;line-height:1.5;">
   <div style="background:linear-gradient(180deg,rgba(80,120,180,0.78) 0%,rgba(40,65,110,0.82) 40%,rgba(20,40,80,0.88) 100%);border:1px solid rgba(160,200,255,0.45);border-radius:8px;padding:0;margin:0;-webkit-box-shadow:0 4px 20px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.25);box-shadow:0 4px 20px rgba(0,0,0,0.35),inset 0 1px 0 rgba(255,255,255,0.25);">
     <div style="height:4px;background:linear-gradient(90deg,${color},${color});border-radius:8px 8px 0 0;opacity:0.9;"></div>
     <div style="position:relative;">
       <div style="position:absolute;top:0;left:0;right:0;height:50%;background:linear-gradient(180deg,rgba(255,255,255,0.18) 0%,rgba(255,255,255,0.04) 100%);pointer-events:none;border-radius:0 0 8px 8px;"></div>
       <div style="padding:14px 16px;position:relative;">
-        <div style="font-size:16px;font-weight:700;color:#ffffff;text-shadow:0 1px 4px rgba(0,0,0,0.4);margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid rgba(255,255,255,0.15);letter-spacing:0.3px;">${escapeXml(String(name))}</div>
-        <table style="width:100%;border-collapse:collapse;font-size:13px;">
-          <style>td.l{color:rgba(200,220,255,0.8);padding:4px 10px 4px 0;white-space:nowrap;font-size:12px;text-transform:uppercase;letter-spacing:0.5px;width:40%;}td.v{color:#ffffff;padding:4px 0;font-weight:500;text-shadow:0 1px 2px rgba(0,0,0,0.3);}tr+tr td{border-top:1px solid rgba(255,255,255,0.06);}</style>
+        <div style="font-size:15px;font-weight:700;color:#ffffff;text-shadow:0 1px 4px rgba(0,0,0,0.4);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid rgba(255,255,255,0.15);letter-spacing:0.3px;">${escapeXml(String(name))}</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px;">
+          <style>td.l{color:rgba(200,220,255,0.8);padding:3px 10px 3px 0;white-space:nowrap;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;width:40%;}td.v{color:#ffffff;padding:3px 0;font-weight:500;text-shadow:0 1px 2px rgba(0,0,0,0.3);font-size:12px;}tr+tr td{border-top:1px solid rgba(255,255,255,0.06);}</style>
           ${rows.join('\n          ')}
         </table>${barHtml}
       </div>
@@ -149,12 +148,15 @@ export async function GET(req: NextRequest) {
 
     const points = await db.dataPoint.findMany({ where, orderBy: { createdAt: 'desc' }, take: 50000 })
 
+    // Icon putih agar warna tinting benar (kuning default × biru = hitam!)
+    // KML color ABGR: kuning label = ff00ffff, hijau = ff00ff00, biru = ffff0000, dll
+    const IC = 'http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png'
     const styles = `
-    <Style id="s-default"><IconStyle><scale>1.0</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-b"><IconStyle><color>ffff0000</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.2</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff000000</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>`
+    <Style id="s-default"><IconStyle><scale>1.5</scale></IconStyle><LabelStyle><scale>0.90</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.5</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.90</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-b"><IconStyle><color>ffff0000</color><scale>1.5</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.90</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.5</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.90</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.5</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.90</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>`
 
     let foldersXml = ''
     if (groupBy && points.length > 0) {
@@ -175,7 +177,7 @@ export async function GET(req: NextRequest) {
       foldersXml = `    <Folder><name>${escapeXml(folderName)}</name>\n${marks}\n    </Folder>\n`
     }
 
-    const kml = `<?xml version="1.0" encoding="UTF-8"?>\n<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n    <name>${escapeXml(active.name)}</name>\n    <description>${escapeXml(active.name)} - ${points.length} titik</description>\n${styles}\n${foldersXml}  </Document>\n</kml>`
+    const kml = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${escapeXml(active.name)}</name><description>${escapeXml(active.name)} - ${points.length} titik</description>${styles}${foldersXml}</Document></kml>`
 
     return new NextResponse(kml, {
       headers: { 'Content-Type': 'application/vnd.google-earth.kml+xml', 'Cache-Control': 'no-cache, no-store, must-revalidate' },
