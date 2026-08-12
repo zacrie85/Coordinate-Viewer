@@ -29,21 +29,33 @@ function calcPct(meta: Record<string, any>, activeCol: string, capacityCol: stri
 }
 
 function pctColor(pct: number): string {
+  if (pct < 0) return '#64748b'
   if (pct <= 25) return '#22c55e'
   if (pct <= 50) return '#3b82f6'
   if (pct <= 75) return '#eab308'
   return '#ef4444'
 }
 
-function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capacityCol: string; activeCol: string; availCol: string; labelCols?: string[] }, i: number, meta: Record<string, any>): string {
+const PCT_RANGES = [
+  { label: 'Capacity 0-25%', min: 0, max: 25, color: '#22c55e' },
+  { label: 'Capacity 26-50%', min: 26, max: 50, color: '#3b82f6' },
+  { label: 'Capacity 51-75%', min: 51, max: 75, color: '#eab308' },
+  { label: 'Capacity 76-100%', min: 76, max: 100, color: '#ef4444' },
+]
+
+function getPctLabel(pct: number): string {
+  if (pct < 0) return 'Capacity 0-25%'
+  if (pct <= 25) return 'Capacity 0-25%'
+  if (pct <= 50) return 'Capacity 26-50%'
+  if (pct <= 75) return 'Capacity 51-75%'
+  return 'Capacity 76-100%'
+}
+
+function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capacityCol: string; activeCol: string; availCol: string; labelCols?: string[] }, meta: Record<string, any>): string {
   const { pct, activeRaw, capRaw } = calcPct(meta, mc.activeCol, mc.capacityCol)
-  const color = pct >= 0 ? pctColor(pct) : '#64748b'
+  const color = pctColor(pct)
   const rows: string[] = []
 
-  // Data lain saja (Active/Capacity/Persentase sudah di atas via barHtml)
-  if (pct >= 0) {
-    // Tidak push Active/Capacity/Persentase ke tabel, sudah di barHtml
-  }
   if (mc.availCol && meta[mc.availCol] && mc.availCol !== mc.activeCol) {
     rows.push(`<tr><td class="l">${escapeXml(mc.availCol)}</td><td class="v">${escapeXml(String(meta[mc.availCol]))}</td></tr>`)
   }
@@ -60,10 +72,9 @@ function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capaci
   if (!name) {
     name = mc.nameCol1 && meta[mc.nameCol1]
       ? [meta[mc.nameCol1], mc.nameCol2 ? meta[mc.nameCol2] : ''].filter(Boolean).join(' - ')
-      : meta['name'] || meta['Name'] || meta['NAMA'] || meta['nama'] || meta['KODE'] || meta['kode'] || `Point ${i + 1}`
+      : meta['name'] || meta['Name'] || meta['NAMA'] || meta['nama'] || meta['KODE'] || meta['kode'] || 'Point'
   }
 
-  // Progress bar + Active/Capacity info di POSISI ATAS
   const barHtml = pct >= 0 ? `
         <div style="padding:10px 14px;background:rgba(255,255,255,0.15);border-radius:0 0 6px 6px;border:1px solid rgba(255,255,255,0.1);border-top:1px solid rgba(255,255,255,0.2);margin:0 2px 10px 2px;">
           <div style="display:flex;justify-content:space-between;align-items:center;font-size:15px;margin-bottom:6px;color:#e0e8f0;">
@@ -100,6 +111,58 @@ function buildPlacemark(p: any, mc: { nameCol1: string; nameCol2: string; capaci
       </Placemark>`
 }
 
+// ── Bangun folder persentase (level paling dalam) ──
+function buildPctFolders(items: any[], mc: any, indent: string): string {
+  const pctGroups: Record<string, any[]> = {}
+  for (const item of items) {
+    const meta = (item.metadata as Record<string, any>) || {}
+    const { pct } = calcPct(meta, mc.activeCol, mc.capacityCol)
+    const label = getPctLabel(pct)
+    if (!pctGroups[label]) pctGroups[label] = []
+    pctGroups[label].push(item)
+  }
+  let xml = ''
+  for (const pr of PCT_RANGES) {
+    const group = pctGroups[pr.label]
+    if (!group || group.length === 0) continue
+    xml += `${indent}<Folder>
+ ${indent}  <name>${pr.label} (${group.length})</name>
+`
+    for (const item of group) {
+      xml += buildPlacemark(item, mc, (item.metadata as Record<string, any>) || {})
+    }
+    xml += `${indent}</Folder>\n`
+  }
+  return xml
+}
+
+// ── Bangun folder filter secara rekursif ──
+function buildGroupFolders(items: any[], fields: string[], mc: any, indent: string): string {
+  if (fields.length === 0) {
+    return buildPctFolders(items, mc, indent)
+  }
+  const field = fields[0]
+  const remaining = fields.slice(1)
+  const groups = new Map<string, any[]>()
+  for (const item of items) {
+    const meta = (item.metadata as Record<string, any>) || {}
+    const key = String(meta[field] || '(kosong)')
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(item)
+  }
+  const sortedKeys = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b))
+  let xml = ''
+  for (const key of sortedKeys) {
+    const groupItems = groups.get(key)!
+    xml += `${indent}<Folder>
+ ${indent}  <name>${escapeXml(key)} (${groupItems.length})</name>
+`
+    xml += buildGroupFolders(groupItems, remaining, mc, indent + '  ')
+    xml += `${indent}</Folder>\n`
+  }
+  return xml
+}
+
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const search = searchParams.get('search') || ''
@@ -109,7 +172,7 @@ export async function GET(req: NextRequest) {
   const capacityCol = searchParams.get('capacityCol') || ''
   const activeCol = searchParams.get('activeCol') || ''
   const availCol = searchParams.get('availCol') || ''
-  const groupBy = searchParams.get('groupBy') || ''
+  const groupByRaw = searchParams.get('groupBy') || ''
   const labelColsRaw = searchParams.get('labelCols') || ''
   const labelCols = labelColsRaw ? labelColsRaw.split(',').map(s => s.trim()).filter(Boolean) : []
   const idsRaw = searchParams.get('ids') || ''
@@ -127,6 +190,17 @@ export async function GET(req: NextRequest) {
 
   const areaIds = idsRaw ? new Set(idsRaw.split(',').map(s => s.trim()).filter(Boolean)) : null
 
+  // Parse groupBy: bisa comma-separated untuk multi-level, atau auto-dari columnFilters
+  let groupFields: string[] = []
+  if (groupByRaw) {
+    groupFields = groupByRaw.split(',').map(s => s.trim()).filter(Boolean)
+  } else {
+    // Auto: gunakan field dari columnFilters sebagai folder level
+    for (const cf of columnFilters) {
+      groupFields.push(cf.field)
+    }
+  }
+
   try {
     const active = await db.dataset.findFirst({ where: { isActive: true } })
     if (!active) {
@@ -140,7 +214,6 @@ export async function GET(req: NextRequest) {
     if (areaIds && areaIds.size > 0) {
       ands.push({ id: { in: Array.from(areaIds) } })
     }
-
     if (hasCoord === 'true') { ands.push({ latitude: { not: 0 } }); ands.push({ longitude: { not: 0 } }) }
     else if (hasCoord === 'false') { ands.push({ OR: [{ latitude: 0 }, { longitude: 0 }] }) }
     if (search) ands.push({ metadata: { path: [], string_contains: search } })
@@ -151,29 +224,18 @@ export async function GET(req: NextRequest) {
 
     const IC = 'http://maps.google.com/mapfiles/kml/shapes/placemark_circle.png'
     const styles = `
-    <Style id="s-default"><IconStyle><scale>1.0</scale></IconStyle><LabelStyle><scale>0.75</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.0</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.75</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-b"><IconStyle><color>ffff0000</color><scale>1.0</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.75</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.0</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.75</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
-    <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.0</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.75</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>`
+    <Style id="s-default"><IconStyle><scale>1.8</scale></IconStyle><LabelStyle><scale>0.95</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-g"><IconStyle><color>ff00ff00</color><scale>1.8</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.95</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-b"><IconStyle><color>ffff0000</color><scale>1.8</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.95</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-y"><IconStyle><color>ff00ffff</color><scale>1.8</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.95</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>
+    <Style id="s-r"><IconStyle><color>ff0000ff</color><scale>1.8</scale><Icon><href>${IC}</href><hotSpot x="0.5" y="0.5" xunits="fraction" yunits="fraction"/></Icon></IconStyle><LabelStyle><scale>0.95</scale><color>ff00ffff</color></LabelStyle><BalloonStyle><bgColor>00000000</bgColor></BalloonStyle></Style>`
 
+    // Bangun folder hierarki: filter1 > filter2 > ... > Capacity %
     let foldersXml = ''
-    if (groupBy && points.length > 0) {
-      const groups = new Map<string, any[]>()
-      for (const p of points) {
-        const m = (p.metadata as Record<string, any>) || {}
-        const key = String(m[groupBy] || '(kosong)')
-        if (!groups.has(key)) groups.set(key, [])
-        groups.get(key)!.push(p)
-      }
-      for (const [groupName, groupPoints] of groups) {
-        const marks = groupPoints.map((p, i) => buildPlacemark(p, mc, i, (p.metadata as Record<string, any>) || {})).join('\n')
-        foldersXml += `    <Folder><name>${escapeXml(`${groupBy}: ${groupName}`)}</name><description>${groupPoints.length} titik</description>\n${marks}\n    </Folder>\n`
-      }
+    if (groupFields.length > 0) {
+      foldersXml = buildGroupFolders(points, groupFields, mc, '    ')
     } else {
-      const folderName = areaIds ? `${active.name} (Area Selection - ${points.length} titik)` : active.name
-      const marks = points.map((p, i) => buildPlacemark(p, mc, i, (p.metadata as Record<string, any>) || {})).join('\n')
-      foldersXml = `    <Folder><name>${escapeXml(folderName)}</name>\n${marks}\n    </Folder>\n`
+      foldersXml = buildPctFolders(points, mc, '    ')
     }
 
     const kml = `<?xml version="1.0" encoding="UTF-8"?><kml xmlns="http://www.opengis.net/kml/2.2"><Document><name>${escapeXml(active.name)}</name><description>${escapeXml(active.name)} - ${points.length} titik</description>${styles}${foldersXml}</Document></kml>`
