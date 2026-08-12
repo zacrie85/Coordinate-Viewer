@@ -32,19 +32,20 @@ interface MapViewProps {
   selectedAreaIds?: Set<string> | null
 }
 
-// ── Point-in-polygon (ray casting) ──
+// ── Point-in-polygon (ray casting) — FIX: lat/lng sudah benar ──
+// polygon: [[lat, lng], ...]  →  x = lng, y = lat
 function pointInPolygon(lat: number, lng: number, polygon: [number, number][]): boolean {
   let inside = false
   for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-    const xi = polygon[i][1], yi = polygon[i][0]
-    const xj = polygon[j][1], yj = polygon[j][0]
-    const intersect = ((yi > lng) !== (yj > lng)) && (lat < (xj - xi) * (lng - yi) / (yj - yi) + xi)
+    const xi = polygon[i][1], yi = polygon[i][0]  // x=lng, y=lat
+    const xj = polygon[j][1], yj = polygon[j][0]  // x=lng, y=lat
+    const intersect = ((yi > lat) !== (yj > lat)) && (lng < (xj - xi) * (lat - yi) / (yj - yi) + xi)
     if (intersect) inside = !inside
   }
   return inside
 }
 
-// ── Hitung persentase: Active / Capacity × 100 ──
+// ── Hitung persentase: Active / Capacity x 100 ──
 function calcPct(meta: Record<string, any>, mc: MarkerConfig): { pct: number; activeRaw: string; capRaw: string } {
   if (mc.activeCol && mc.capacityCol) {
     const aRaw = String(meta[mc.activeCol] ?? '').trim()
@@ -87,6 +88,19 @@ function statusColor(val: string): string {
   return '#64748b'
 }
 
+function getPointLabel(meta: Record<string, any>, mc: MarkerConfig): string {
+  if (mc.nameCol2) {
+    const v = String(meta[mc.nameCol2] || '').trim()
+    if (v) return v
+  }
+  if (mc.nameCol1) {
+    const v = String(meta[mc.nameCol1] || '').trim()
+    if (v) return v
+  }
+  const first = Object.entries(meta).find(([, v]) => v && v !== '')
+  return first ? String(first[1]).substring(0, 30) : 'Point'
+}
+
 export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, columns, markerConfig, drawMode, onAreaSelected, selectedAreaIds }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<any>(null)
@@ -94,6 +108,8 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
   const markersRef = useRef<Map<string, any>>(new Map())
   const [mapError, setMapError] = useState<string | null>(null)
   const [mapReady, setMapReady] = useState(false)
+  const [drawing, setDrawing] = useState(false)          // FIX: state untuk tombol Finish
+  const [vertexCount, setVertexCount] = useState(0)      // FIX: jumlah vertex untuk UI
   const pointsRef = useRef(points)
   useEffect(() => { pointsRef.current = points }, [points])
   const stableSelect = useCallback((p: DataPoint | null) => onSelectPoint(p), [onSelectPoint])
@@ -105,8 +121,11 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
   const drawingRef = useRef<any>(null) // L.polyline for in-progress drawing
   const drawVerticesRef = useRef<[number, number][]>([])
   const drawLayerRef = useRef<any>(null) // L.layerGroup for polygon
+  const vertexMarkersRef = useRef<any[]>([]) // FIX: simpan vertex markers agar bisa dihapus
   const drawModeRef = useRef(drawMode)
+  const onAreaSelectedRef = useRef(onAreaSelected) // FIX: ref untuk callback
   useEffect(() => { drawModeRef.current = drawMode }, [drawMode])
+  useEffect(() => { onAreaSelectedRef.current = onAreaSelected }, [onAreaSelected])
 
   // Init map with clustering
   useEffect(() => {
@@ -308,12 +327,57 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
     }
   }, [points, selectedPoint])
 
-  // ── Polygon drawing ──
+  // ── Finish drawing polygon (dipanggil dari tombol Finish atau dblclick) ──
+  const finishDrawing = useCallback(() => {
+    const map = mapRef.current
+    if (!map || !L) return
+
+    const vertices = drawVerticesRef.current
+    if (vertices.length < 3) return
+
+    // Remove drawing line
+    if (drawingRef.current) { map.removeLayer(drawingRef.current); drawingRef.current = null }
+
+    // Clear vertex markers
+    for (const vm of vertexMarkersRef.current) {
+      if (drawLayerRef.current) drawLayerRef.current.removeLayer(vm)
+    }
+    vertexMarkersRef.current = []
+
+    // Draw filled polygon
+    const polygon = L!.polygon(vertices, {
+      color: '#7c3aed', weight: 2, fillColor: '#8b5cf6', fillOpacity: 0.15,
+    }).addTo(drawLayerRef.current)
+
+    // Find points inside polygon using ray casting (FIXED)
+    const ids = new Set<string>()
+    for (const p of pointsRef.current) {
+      if (p.latitude === 0 && p.longitude === 0) continue
+      if (pointInPolygon(p.latitude, p.longitude, vertices)) {
+        ids.add(p.id)
+      }
+    }
+
+    onAreaSelectedRef.current?.(ids)
+
+    // Reset drawing state
+    drawVerticesRef.current = []
+    setDrawing(false)
+    setVertexCount(0)
+  }, [])
+
+  // Store finishDrawing in ref for use inside event handler
+  const finishDrawingRef = useRef(finishDrawing)
+  useEffect(() => { finishDrawingRef.current = finishDrawing }, [finishDrawing])
+
+  // ── Polygon drawing ── FIX: dblclick disabled, pakai tombol Finish ──
   useEffect(() => {
     const map = mapRef.current
     if (!map || !L) return
 
     if (drawMode) {
+      // FIX: disable dblclick zoom saat draw mode
+      map.doubleClickZoom.disable()
       map.getContainer().style.cursor = 'crosshair'
 
       const onClick = (e: any) => {
@@ -324,9 +388,10 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
         // Remove old drawing line
         if (drawingRef.current) map.removeLayer(drawingRef.current)
 
-        // Draw line through all vertices
-        if (drawVerticesRef.current.length > 1) {
-          drawingRef.current = L!.polyline(drawVerticesRef.current, {
+        // Draw line through all vertices + back to first
+        if (drawVerticesRef.current.length >= 2) {
+          const previewVerts = [...drawVerticesRef.current, drawVerticesRef.current[0]]
+          drawingRef.current = L!.polyline(previewVerts, {
             color: '#8b5cf6', weight: 3, dashArray: '8, 6', opacity: 0.9,
           }).addTo(map)
         }
@@ -335,50 +400,24 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
         const vertexMarker = L!.circleMarker(vertex, {
           radius: 5, fillColor: '#8b5cf6', color: '#fff', weight: 2, fillOpacity: 1,
         }).addTo(drawLayerRef.current)
-        vertexMarker._isDrawVertex = true
+        vertexMarkersRef.current.push(vertexMarker)
+
+        setDrawing(true)
+        setVertexCount(drawVerticesRef.current.length)
       }
 
+      // FIX: dblclick hanya untuk finish, tidak zoom
       const onDblClick = (e: any) => {
         L!.DomEvent.stopPropagation(e)
         L!.DomEvent.preventDefault(e)
-
-        const vertices = drawVerticesRef.current
-        if (vertices.length < 3) return
-
-        // Close polygon
-        vertices.push(vertices[0])
-
-        // Remove drawing line
-        if (drawingRef.current) { map.removeLayer(drawingRef.current); drawingRef.current = null }
-
-        // Clear vertex markers
-        if (drawLayerRef.current) {
-          drawLayerRef.current.eachLayer((layer: any) => {
-            if (layer._isDrawVertex) drawLayerRef.current.removeLayer(layer)
-          })
+        // Hapus vertex terakhir yang ke-duplicate dari click kedua
+        if (drawVerticesRef.current.length > 3) {
+          drawVerticesRef.current.pop()
+          const lastVm = vertexMarkersRef.current.pop()
+          if (lastVm && drawLayerRef.current) drawLayerRef.current.removeLayer(lastVm)
+          setVertexCount(drawVerticesRef.current.length)
         }
-
-        // Remove closing vertex (duplicate)
-        const closedVerts = vertices.slice(0, -1)
-
-        // Draw filled polygon
-        const polygon = L!.polygon(closedVerts, {
-          color: '#7c3aed', weight: 2, fillColor: '#8b5cf6', fillOpacity: 0.15,
-        }).addTo(drawLayerRef.current)
-
-        // Find points inside polygon using ray casting
-        const ids = new Set<string>()
-        for (const p of pointsRef.current) {
-          if (p.latitude === 0 && p.longitude === 0) continue
-          if (pointInPolygon(p.latitude, p.longitude, closedVerts)) {
-            ids.add(p.id)
-          }
-        }
-
-        onAreaSelected?.(ids)
-
-        // Reset drawing state
-        drawVerticesRef.current = []
+        finishDrawingRef.current()
       }
 
       map.on('click', onClick)
@@ -387,22 +426,35 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
       return () => {
         map.off('click', onClick)
         map.off('dblclick', onDblClick)
+        map.doubleClickZoom.enable() // FIX: restore dblclick zoom
         map.getContainer().style.cursor = ''
         if (drawingRef.current) { map.removeLayer(drawingRef.current); drawingRef.current = null }
+        for (const vm of vertexMarkersRef.current) {
+          if (drawLayerRef.current) drawLayerRef.current.removeLayer(vm)
+        }
+        vertexMarkersRef.current = []
         drawVerticesRef.current = []
+        setDrawing(false)
+        setVertexCount(0)
       }
     } else {
-      // Clear drawing state when exiting draw mode
       map.getContainer().style.cursor = ''
       if (drawingRef.current) { map.removeLayer(drawingRef.current); drawingRef.current = null }
+      for (const vm of vertexMarkersRef.current) {
+        if (drawLayerRef.current) drawLayerRef.current.removeLayer(vm)
+      }
+      vertexMarkersRef.current = []
       drawVerticesRef.current = []
+      setDrawing(false)
+      setVertexCount(0)
     }
-  }, [drawMode, onAreaSelected])
+  }, [drawMode])
 
   // Clear polygon when selectedAreaIds is nullified
   useEffect(() => {
     if (selectedAreaIds === null && drawLayerRef.current) {
       drawLayerRef.current.clearLayers()
+      vertexMarkersRef.current = []
     }
   }, [selectedAreaIds])
 
@@ -423,9 +475,20 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
 
       {/* Draw mode overlay */}
       {drawMode && !selectedAreaIds && (
-        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-[1001] bg-violet-500 text-white px-4 py-2 rounded-full shadow-lg text-xs font-semibold flex items-center gap-2 animate-pulse">
-          Klik untuk menambah titik. Double-click untuk menutup polygon
+        <div className="absolute top-16 left-1/2 -translate-x-1/2 z-[1001] bg-violet-500 text-white px-4 py-2 rounded-full shadow-lg text-xs font-semibold flex items-center gap-2">
+          Klik untuk menambah titik. {drawing ? `${vertexCount} titik` : 'Mulai klik pada peta.'}
         </div>
+      )}
+
+      {/* FIX: Tombol Finish polygon */}
+      {drawMode && drawing && vertexCount >= 3 && !selectedAreaIds && (
+        <button
+          onClick={finishDrawing}
+          className="absolute top-16 right-16 z-[1001] bg-violet-600 hover:bg-violet-700 text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-bold flex items-center gap-2 transition-colors"
+        >
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M3 8l4 4 6-8" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+          Finish ({vertexCount} titik)
+        </button>
       )}
 
       {/* Legend */}
