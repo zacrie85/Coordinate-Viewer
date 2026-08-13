@@ -172,6 +172,7 @@ export default function ODPMap({ points, loading, selectedPoint, onSelectPoint, 
           spiderfyOnMaxZoom: true,
           showCoverageOnHover: false,
           zoomToBoundsOnClick: true,
+          disableClusteringAtZoom: 9,
           iconCreateFunction: (cluster: any) => {
             const count = cluster.getChildCount()
             let dim = 36
